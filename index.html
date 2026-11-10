@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D/3D Video Game Prototype</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; color: white; font-family: sans-serif; }
+        #info {
+            position: absolute; top: 20px; width: 100%; text-align: center;
+            pointer-events: none; z-index: 10; text-shadow: 1px 1px 3px black;
+        }
+        #game-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; }
+        button {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            padding: 15px 30px; font-size: 18px; cursor: pointer; z-index: 20;
+            background: #e74c3c; color: white; border: none; border-radius: 5px;
+        }
+        button:hover { background: #c0392b; }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <h1>3D Video Experience</h1>
+        <p>Нажмите на видео, чтобы начать игру</p>
+    </div>
+    <button id="start-btn">Начать игру</button>
+    <div id="game-container"></div>
+
+    <!-- Подключаем Three.js и Phaser через CDN -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- 1. НАСТРОЙКА 3D-СЦЕНЫ С ВИДЕО ---
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 2;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        // Создаём HTML5 видео-элемент
+        const video = document.createElement('video');
+        video.src = 'video.mp4'; // <-- Замените на ваш файл или URL
+        video.loop = true;
+        video.muted = true; // Важно для автовоспроизведения в некоторых браузерах
+        video.crossOrigin = 'anonymous';
+        video.play().catch(e => console.log("Автовоспроизведение заблокировано, ждём клика."));
+
+        // Превращаем видео в текстуру для Three.js
+        const videoTexture = new THREE.VideoTexture(video);
+        videoTexture.colorSpace = THREE.SRGBColorSpace;
+
+        // Создаём плоскость, на которую натянуто видео
+        const geometry = new THREE.PlaneGeometry(3.5, 2);
+        const material = new THREE.MeshBasicMaterial({ map: videoTexture });
+        const videoScreen = new THREE.Mesh(geometry, material);
+        scene.add(videoScreen);
+
+        // Анимация 3D-сцены
+        function animate() {
+            requestAnimationFrame(animate);
+            if (video.readyState >= 2) {
+                videoScreen.rotation.y = Math.sin(Date.now() * 0.001) * 0.1;
+            }
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // --- 2. ПЕРЕХОД В 2D-ИГРУ (PHASER) ---
+        const startBtn = document.getElementById('start-btn');
+        const infoDiv = document.getElementById('info');
+        const gameContainer = document.getElementById('game-container');
+
+        startBtn.addEventListener('click', () => {
+            // Плавно скрываем 3D
+            renderer.domElement.style.transition = 'opacity 0.5s';
+            renderer.domElement.style.opacity = '0';
+            startBtn.style.display = 'none';
+            infoDiv.style.display = 'none';
+
+            // Показываем контейнер для игры
+            gameContainer.style.display = 'block';
+
+            // Запускаем простую игру на Phaser
+            startPhaserGame();
+        });
+
+        function startPhaserGame() {
+            // Динамически подгружаем Phaser, чтобы не тормозить загрузку
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js';
+            script.onload = () => {
+                const config = {
+                    type: Phaser.AUTO,
+                    parent: 'game-container',
+                    width: window.innerWidth,
+                    height: window.innerHeight,
+                    backgroundColor: '#2c3e50',
+                    scene: {
+                        create: create,
+                        update: update
+                    }
+                };
+
+                const game = new Phaser.Game(config);
+                let player, cursors, stars, score = 0, scoreText;
+
+                function create() {
+                    // Игрок (квадрат)
+                    player = this.add.rectangle(400, 300, 50, 50, 0xe74c3c);
+                    this.physics.add.existing(player);
+                    player.body.setCollideWorldBounds(true);
+
+                    // Звёзды для сбора
+                    stars = this.physics.add.group();
+                    for (let i = 0; i < 10; i++) {
+                        const star = this.add.circle(
+                            Phaser.Math.Between(50, window.innerWidth - 50),
+                            Phaser.Math.Between(50, window.innerHeight - 50),
+                            15, 0xf1c40f
+                        );
+                        this.physics.add.existing(star);
+                        stars.add(star);
+                    }
+
+                    // Управление
+                    cursors = this.input.keyboard.createCursorKeys();
+
+                    // Счёт
+                    scoreText = this.add.text(16, 16, 'Счёт: 0', { fontSize: '32px', fill: '#fff' });
+
+                    // Сбор звёзд
+                    this.physics.add.overlap(player, stars, (player, star) => {
+                        star.destroy();
+                        score += 10;
+                        scoreText.setText('Счёт: ' + score);
+                    });
+                }
+
+                function update() {
+                    if (!player || !player.body) return;
+                    const speed = 300;
+                    player.body.setVelocity(0);
+
+                    if (cursors.left.isDown) player.body.setVelocityX(-speed);
+                    else if (cursors.right.isDown) player.body.setVelocityX(speed);
+
+                    if (cursors.up.isDown) player.body.setVelocityY(-speed);
+                    else if (cursors.down.isDown) player.body.setVelocityY(speed);
+                }
+            };
+            document.head.appendChild(script);
+        }
+
+        // --- Обработка изменения размера окна ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
