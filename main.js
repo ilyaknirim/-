@@ -540,19 +540,15 @@ const game = {
     },
   },
 };
-/* =========================================================
-   SAVE / LOAD
-   ========================================================= */
+// ===== SAVE / LOAD (простая версия, без Proxy) =====
 const SAVE_KEY = 'iskra.save.v1';
 
 function saveGame() {
   try {
-    const data = {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
       v: 1,
       flags: game.state.flags,
-      last3DPos: game.state.last3DPos,
-    };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    }));
   } catch (e) {
     console.warn('[save] failed', e);
   }
@@ -561,38 +557,20 @@ function saveGame() {
 function loadGame() {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return false;
+    if (!raw) return;
     const data = JSON.parse(raw);
-    if (data.v !== 1) return false;
-    Object.assign(game.state.flags, data.flags || {});
-    if (data.last3DPos) {
-      game.state.last3DPos.x = data.last3DPos.x;
-      game.state.last3DPos.z = data.last3DPos.z;
+    if (data && data.v === 1 && data.flags) {
+      Object.assign(game.state.flags, data.flags);
     }
-    console.log('[save] loaded', game.state.flags);
-    return true;
   } catch (e) {
     console.warn('[save] load failed', e);
-    return false;
   }
 }
 
-function resetGame() {
-  localStorage.removeItem(SAVE_KEY);
+window.iskraReset = function () {
+  try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
   location.reload();
-}
-
-// флаги сохраняются сами при любом изменении
-game.state.flags = new Proxy(game.state.flags, {
-  set(target, key, value) {
-    target[key] = value;
-    saveGame();
-    return true;
-  },
-});
-
-// из консоли браузера: iskraReset()
-window.iskraReset = resetGame;
+};
 
 loadGame();
 function resize() {
