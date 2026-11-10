@@ -38,6 +38,314 @@ const PULT_POS = { x: 10.5, z: 6 };
 const DOMOVOI_POS = { x: PULT_POS.x - 1.3, y: 1.5, z: PULT_POS.z };
 const ISKRA_2D_POS = { x: -8, z: -12 };
 
+/* ---------- slavic palette ---------- */
+const C = {
+  gold: 0xd4a843,
+  goldBright: 0xffdd66,
+  red: 0xc02030,
+  redBright: 0xff3a4a,
+  malachite: 0x2a6b4f,
+  coal: 0x0a0a14,
+  iron: 0x1a1a24,
+  cyan: 0x4ff0ff,
+  moon: 0xc8d4e0,
+};
+
+/* =========================================================
+   SLAVIC TEXTURES (canvas generators)
+   ========================================================= */
+function makeCanvasTexture(renderFn, w = 512, h = 512) {
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const c2 = cv.getContext('2d');
+  renderFn(c2, w, h);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.needsUpdate = true;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+/* Оберег-рамка: используется по краям грамот/экранов */
+function drawOrnamentBorder(c, w, h, color = '#d4a843', inset = 8) {
+  c.strokeStyle = color;
+  c.lineWidth = 1.5;
+  c.strokeRect(inset, inset, w - inset * 2, h - inset * 2);
+
+  // угловые ромбы
+  const d = 6;
+  const corners = [[inset, inset], [w - inset, inset], [inset, h - inset], [w - inset, h - inset]];
+  c.fillStyle = '#c02030';
+  for (const [x, y] of corners) {
+    c.beginPath();
+    c.moveTo(x, y - d);
+    c.lineTo(x + d, y);
+    c.lineTo(x, y + d);
+    c.lineTo(x - d, y);
+    c.closePath();
+    c.fill();
+  }
+}
+
+/* Зигзаг-оберег (символ воды) */
+function drawZigzag(c, x1, y, x2, amp = 4, step = 10, color = '#d4a843') {
+  c.strokeStyle = color;
+  c.lineWidth = 1.5;
+  c.beginPath();
+  c.moveTo(x1, y);
+  let sign = -1;
+  for (let x = x1 + step; x <= x2; x += step) {
+    c.lineTo(x, y + sign * amp);
+    sign = -sign;
+  }
+  c.stroke();
+}
+
+/* Сварга (вращающийся крест) — рисуется как 8-лучевая звезда */
+function drawSvarog(c, cx, cy, r, color = '#d4a843') {
+  c.strokeStyle = color;
+  c.lineWidth = 2;
+  c.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const a = i * Math.PI / 4;
+    c.moveTo(cx, cy);
+    c.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+  }
+  c.stroke();
+  c.fillStyle = color;
+  c.beginPath();
+  c.arc(cx, cy, 3, 0, Math.PI * 2);
+  c.fill();
+}
+
+/* Ромб с точкой (символ зерна/жизни) */
+function drawDiamond(c, cx, cy, r, color = '#c02030') {
+  c.fillStyle = color;
+  c.beginPath();
+  c.moveTo(cx, cy - r);
+  c.lineTo(cx + r, cy);
+  c.lineTo(cx, cy + r);
+  c.lineTo(cx - r, cy);
+  c.closePath();
+  c.fill();
+  c.fillStyle = '#0a0a14';
+  c.beginPath();
+  c.arc(cx, cy, r * 0.35, 0, Math.PI * 2);
+  c.fill();
+}
+
+/* Текстура стены: тёмный камень + резьба + неоновая подсветка */
+function makeWallTexture(seed = 1) {
+  return makeCanvasTexture((c, w, h) => {
+    // фон — тёмный камень с шумом
+    c.fillStyle = '#0a1020';
+    c.fillRect(0, 0, w, h);
+    let s = seed * 1000;
+    const rnd = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+    for (let i = 0; i < 400; i++) {
+      const x = rnd() * w, y = rnd() * h;
+      c.fillStyle = `rgba(${20 + rnd() * 20}, ${30 + rnd() * 30}, ${50 + rnd() * 40}, ${0.15 + rnd() * 0.2})`;
+      c.fillRect(x, y, 2 + rnd() * 4, 1 + rnd() * 3);
+    }
+
+    // горизонтальные полосы камня
+    c.strokeStyle = 'rgba(60, 90, 140, 0.25)';
+    c.lineWidth = 1;
+    for (let y = 40; y < h; y += 80) {
+      c.beginPath();
+      c.moveTo(0, y);
+      for (let x = 0; x < w; x += 20) {
+        c.lineTo(x + 20, y + (rnd() - 0.5) * 4);
+      }
+      c.stroke();
+    }
+
+    // неоновая резьба — ромбы и сварги по сетке
+    const gridSize = 128;
+    for (let gy = 0; gy < h; gy += gridSize) {
+      for (let gx = 0; gx < w; gx += gridSize) {
+        const cx = gx + gridSize / 2;
+        const cy = gy + gridSize / 2;
+        const kind = Math.floor(rnd() * 4);
+        const col = kind === 0 ? 'rgba(79,240,255,0.7)' : kind === 1 ? 'rgba(212,168,67,0.6)' : 'rgba(192,32,48,0.55)';
+        if (kind === 0) drawSvarog(c, cx, cy, 24, col);
+        else if (kind === 1) {
+          c.strokeStyle = col;
+          c.lineWidth = 1.5;
+          c.beginPath();
+          c.arc(cx, cy, 22, 0, Math.PI * 2);
+          c.stroke();
+          drawSvarog(c, cx, cy, 14, col);
+        }
+        else if (kind === 2) drawDiamond(c, cx, cy, 16, col);
+        else {
+          c.strokeStyle = col;
+          c.lineWidth = 1.5;
+          c.strokeRect(cx - 20, cy - 20, 40, 40);
+          c.strokeRect(cx - 14, cy - 14, 28, 28);
+        }
+      }
+    }
+
+    // горизонтальная золотая нить-оберег
+    c.strokeStyle = 'rgba(212,168,67,0.35)';
+    c.lineWidth = 2;
+    for (let y of [10, h - 10]) {
+      c.beginPath();
+      c.moveTo(0, y);
+      c.lineTo(w, y);
+      c.stroke();
+    }
+  }, 512, 512);
+}
+
+/* Текстура пола: половицы с золотыми прожилками */
+function makeFloorTexture() {
+  return makeCanvasTexture((c, w, h) => {
+    c.fillStyle = '#0a0e1a';
+    c.fillRect(0, 0, w, h);
+
+    // половицы
+    const plankH = 32;
+    for (let y = 0; y < h; y += plankH) {
+      // сама доска
+      c.fillStyle = y % (plankH * 2) === 0 ? '#0f1525' : '#0d1220';
+      c.fillRect(0, y, w, plankH);
+
+      // прожилки
+      let s = y * 17 + 3;
+      const rnd = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+      for (let i = 0; i < 12; i++) {
+        const x1 = rnd() * w;
+        c.strokeStyle = `rgba(${80 + rnd() * 60}, ${60 + rnd() * 40}, ${30 + rnd() * 20}, ${0.2 + rnd() * 0.2})`;
+        c.lineWidth = 0.5 + rnd() * 1;
+        c.beginPath();
+        c.moveTo(x1, y + rnd() * plankH);
+        c.lineTo(x1 + 20 + rnd() * 60, y + rnd() * plankH);
+        c.stroke();
+      }
+
+      // золотая нить по краю доски
+      c.strokeStyle = 'rgba(212,168,67,0.2)';
+      c.lineWidth = 1;
+      c.beginPath();
+      c.moveTo(0, y);
+      c.lineTo(w, y);
+      c.stroke();
+
+      // редкие ромбы-обереги
+      if (y % (plankH * 4) === 0) {
+        for (let x = 64; x < w; x += 160) {
+          drawDiamond(c, x, y + plankH / 2, 6, 'rgba(192,32,48,0.5)');
+        }
+      }
+    }
+  }, 512, 512);
+}
+
+/* Текстура для экрана пульта (кибер-лубок) */
+function makePultScreenTexture() {
+  return makeCanvasTexture((c, w, h) => {
+    // фон
+    const grad = c.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, '#04101e');
+    grad.addColorStop(1, '#081828');
+    c.fillStyle = grad;
+    c.fillRect(0, 0, w, h);
+
+    // оберег-рамка
+    drawOrnamentBorder(c, w, h, '#d4a843', 10);
+
+    // заголовок
+    c.fillStyle = '#4ff0ff';
+    c.font = 'bold 22px monospace';
+    c.textAlign = 'center';
+    c.fillText('РУСЬ · КОВЧЕГ 7', w / 2, 44);
+    drawZigzag(c, 30, 60, w - 30, 3, 8, '#d4a843');
+
+    // строки статуса
+    c.font = 'bold 15px monospace';
+    c.textAlign = 'left';
+    c.fillStyle = '#ff3a4a';
+    c.fillText('> СВЯЗЬ С ЗЕМЛЁЙ: ПОТЕРЯНА', 30, 100);
+    c.fillStyle = '#88ffaa';
+    c.fillText('> Сварог: ядро активно', 30, 128);
+    c.fillStyle = '#4ff0ff';
+    c.fillText('> пробуждение... 01', 30, 156);
+    c.fillText('> ищи домового', 30, 184);
+
+    // маленькая сварга в углу
+    drawSvarog(c, w - 50, h - 50, 22, 'rgba(212,168,67,0.6)');
+  }, 512, 256);
+}
+
+/* Текстура экрана на стене (аварийный режим) */
+function makeWallScreenTexture() {
+  return makeCanvasTexture((c, w, h) => {
+    c.fillStyle = '#02060e';
+    c.fillRect(0, 0, w, h);
+    drawOrnamentBorder(c, w, h, '#d4a843', 8);
+
+    c.fillStyle = '#ff8a1a';
+    c.font = 'bold 24px monospace';
+    c.textAlign = 'center';
+    c.fillText('АВАРИЙНЫЙ РЕЖИМ', w / 2, 66);
+    drawZigzag(c, 40, 82, w - 40, 3, 8, '#d4a843');
+
+    c.fillStyle = '#4ff0ff';
+    c.font = 'bold 18px monospace';
+    c.fillText('ЭКИПАЖ: 0', w / 2, 118);
+    c.fillText('ВЫЖИВШИХ: 1', w / 2, 148);
+    c.fillStyle = '#ff3a4a';
+    c.fillText('РЕАКТОР: 12%', w / 2, 178);
+
+    drawSvarog(c, 30, h - 30, 16, 'rgba(212,168,67,0.5)');
+    drawSvarog(c, w - 30, h - 30, 16, 'rgba(212,168,67,0.5)');
+  }, 512, 256);
+}
+
+/* Текстура капсулы — резная колыбель */
+function makeCapsuleTexture(index, isWarning = false) {
+  return makeCanvasTexture((c, w, h) => {
+    // фон — дерево+металл
+    c.fillStyle = isWarning ? '#1a0e10' : '#0e1220';
+    c.fillRect(0, 0, w, h);
+
+    // волокна
+    let s = index * 71 + 3;
+    const rnd = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+    for (let i = 0; i < 60; i++) {
+      c.strokeStyle = `rgba(${60 + rnd() * 40}, ${40 + rnd() * 30}, ${20 + rnd() * 20}, 0.3)`;
+      c.lineWidth = 0.5 + rnd();
+      c.beginPath();
+      const y = rnd() * h;
+      c.moveTo(0, y);
+      c.bezierCurveTo(w * 0.3, y + (rnd() - 0.5) * 20, w * 0.7, y + (rnd() - 0.5) * 20, w, y);
+      c.stroke();
+    }
+
+    // резной орнамент — вертикальные ряды
+    const ornamentColor = isWarning ? '#ff3a4a' : '#d4a843';
+    for (let y = 30; y < h - 30; y += 60) {
+      for (let x = 30; x < w - 30; x += 60) {
+        drawDiamond(c, x, y, 8, ornamentColor);
+      }
+    }
+
+    // крупная руна-оберег в центре (по индексу)
+    const runes = ['ᚱ', 'ᚨ', 'ᛞ', 'ᛊ', 'ᛉ'];
+    c.font = 'bold 100px monospace';
+    c.fillStyle = ornamentColor;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.globalAlpha = 0.55;
+    c.fillText(runes[index % runes.length], w / 2, h / 2);
+    c.globalAlpha = 1;
+
+    // рамка
+    drawOrnamentBorder(c, w, h, ornamentColor, 12);
+  }, 256, 512);
+}
+
 /* =========================================================
    DIALOGUE
    ========================================================= */
@@ -57,7 +365,7 @@ function startDialogue(speaker, lines, onComplete = null) {
   dialogueSpeakerEl.textContent = speaker;
   dialogueTextEl.textContent = lines[0];
   dialogueEl.classList.remove('dialogue-hidden');
-  console.log('[dialogue] start', speaker, '(', lines.length, 'lines)');
+  console.log('[dialogue] start', speaker);
 }
 
 function advanceDialogue() {
@@ -68,7 +376,6 @@ function advanceDialogue() {
     return;
   }
   dialogueTextEl.textContent = dialogue.lines[dialogue.index];
-  console.log('[dialogue] line', dialogue.index + 1);
 }
 
 function closeDialogue() {
@@ -77,7 +384,6 @@ function closeDialogue() {
   dialogueEl.classList.add('dialogue-hidden');
   const cb = dialogue.onComplete;
   dialogue.onComplete = null;
-  console.log('[dialogue] closed');
   if (cb) cb();
 }
 
@@ -147,7 +453,6 @@ function setupTouchUI() {
   const show = detectTouch();
   input.touchMode = show;
   mobileUI.classList.toggle('visible', show);
-  console.log('[touch] enabled =', show);
 }
 
 const joyBase = document.getElementById('joystick-base');
@@ -256,7 +561,6 @@ function hint(text, ms = 3000) {
   hintEl.classList.add('show');
   clearTimeout(hintTimer);
   hintTimer = setTimeout(() => hintEl.classList.remove('show'), ms);
-  console.log('[hint]', text);
 }
 
 function refreshHUD() {
@@ -264,12 +568,12 @@ function refreshHUD() {
   let text;
   if (input.touchMode) {
     text = is3D
-      ? '3D · джойстик — ходьба · правый край — камера · F — бросок · E — действие'
-      : '2D · джойстик — ходьба · E — действие';
+      ? '⚔ ЯВЬ · джойстик — ходьба · F — клубок · E — действие'
+      : '◐ НАВЬ · джойстик — ходьба · E — действие';
   } else {
     text = is3D
-      ? '3D · WASD — движение · зажать мышь — камера · F — клубок · E — действие'
-      : '2D · WASD / стрелки — движение · E — действие';
+      ? '⚔ ЯВЬ · WASD · мышь — камера · F — клубок · E — действие'
+      : '◐ НАВЬ · WASD — движение · E — действие';
   }
   if (game.state.flags.iskraMaterialized) text += ' · ✦ Искра';
   hudEl.textContent = text;
@@ -285,42 +589,18 @@ function setCanvasMode(is3D) {
 }
 
 /* =========================================================
-   HELPERS
+   3D BUILDERS — SLAVIC STYLE
    ========================================================= */
-function makeCanvasTexture(renderFn, w = 512, h = 256) {
-  const cv = document.createElement('canvas');
-  cv.width = w; cv.height = h;
-  const c2 = cv.getContext('2d');
-  renderFn(c2, w, h);
-  const tex = new THREE.CanvasTexture(cv);
-  tex.needsUpdate = true;
-  tex.anisotropy = 4;
-  return tex;
-}
-
-function makeTextTexture(text, { color = '#ff3a4a', fontSize = 80, height = 1.2, letterSpacing = 6 } = {}) {
-  const cv = document.createElement('canvas');
-  const c2 = cv.getContext('2d');
-  c2.font = `bold ${fontSize}px "Courier New", monospace`;
-  const measured = c2.measureText(text).width + letterSpacing * (text.length - 1);
-  const pad = 40;
-  cv.width = Math.ceil(measured + pad * 2);
-  cv.height = fontSize + pad * 2;
-  const c3 = cv.getContext('2d');
-  c3.font = `bold ${fontSize}px "Courier New", monospace`;
-  c3.fillStyle = color;
-  c3.textBaseline = 'middle';
-  let x = pad;
-  for (const ch of text) {
-    c3.fillText(ch, x, cv.height / 2);
-    x += c3.measureText(ch).width + letterSpacing;
-  }
-  const tex = new THREE.CanvasTexture(cv);
-  tex.needsUpdate = true;
-  tex.anisotropy = 4;
-  const aspect = tex.image.width / tex.image.height;
-  const geo = new THREE.PlaneGeometry(height * aspect, height);
-  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+function buildWallMesh(w, h, d, texture) {
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const mat = new THREE.MeshStandardMaterial({
+    map: texture || null,
+    color: texture ? 0xffffff : C.iron,
+    emissive: 0x0a0a14,
+    emissiveIntensity: 0.4,
+    roughness: 0.8,
+    metalness: 0.4,
+  });
   return new THREE.Mesh(geo, mat);
 }
 
@@ -328,55 +608,78 @@ function buildCapsule(index) {
   const group = new THREE.Group();
   const isWarning = index === 1;
 
-  const baseMat = new THREE.MeshStandardMaterial({ color: 0x1a2a44, metalness: 0.7, roughness: 0.4 });
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.0, 0.3, 24), baseMat);
+  // Основание — резной камень
+  const baseMat = new THREE.MeshStandardMaterial({
+    color: C.coal,
+    metalness: 0.6,
+    roughness: 0.5,
+    emissive: isWarning ? 0x200810 : 0x0a0a14,
+    emissiveIntensity: 0.4,
+  });
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.05, 0.3, 8), baseMat);
   base.position.y = 0.15;
   group.add(base);
 
+  // Тело капсулы — сужается к изножью (как люлька/гроб)
+  const capsuleTex = makeCapsuleTexture(index, isWarning);
   const glassMat = new THREE.MeshPhysicalMaterial({
-    color: 0x4aa8ff, transparent: true, opacity: 0.22,
-    metalness: 0.1, roughness: 0.1, side: THREE.DoubleSide,
-    emissive: 0x113366, emissiveIntensity: 0.4,
+    map: capsuleTex,
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.55,
+    metalness: 0.2,
+    roughness: 0.3,
+    side: THREE.DoubleSide,
+    emissive: isWarning ? 0x330810 : 0x0a1a30,
+    emissiveIntensity: 0.5,
   });
-  const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.85, 2.6, 24, 1, true), glassMat);
-  glass.position.y = 1.5;
-  group.add(glass);
-
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x081620, roughness: 0.9 });
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.7, 2.2, 16), bodyMat);
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.6, 2.6, 12, 1, true), glassMat);
   body.position.y = 1.5;
   group.add(body);
 
-  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.85, 0.3, 24), baseMat);
-  cap.position.y = 2.95;
-  group.add(cap);
+  // Внутренний силуэт
+  const innerMat = new THREE.MeshStandardMaterial({ color: 0x040814, roughness: 0.95 });
+  const inner = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.4, 2.2, 8), innerMat);
+  inner.position.y = 1.5;
+  group.add(inner);
 
+  // Верх — резной купол
+  const domeMat = new THREE.MeshStandardMaterial({
+    color: C.coal,
+    metalness: 0.7,
+    roughness: 0.4,
+    emissive: 0x0a0a14,
+    emissiveIntensity: 0.5,
+  });
+  const dome = new THREE.Mesh(new THREE.ConeGeometry(0.9, 0.6, 8), domeMat);
+  dome.position.y = 3.1;
+  group.add(dome);
+
+  // Кольцо-оберег внизу (красное или золотое)
+  const ringColor = isWarning ? C.redBright : C.gold;
   const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(0.88, 0.04, 8, 32),
-    new THREE.MeshBasicMaterial({
-      color: isWarning ? 0xff3a4a : 0x44ffaa,
-      transparent: true, opacity: 0.85,
-    })
+    new THREE.TorusGeometry(0.85, 0.045, 6, 32),
+    new THREE.MeshBasicMaterial({ color: ringColor, transparent: true, opacity: 0.9 })
   );
   ring.rotation.x = Math.PI / 2;
   ring.position.y = 0.31;
   group.add(ring);
 
-  const glow = new THREE.PointLight(isWarning ? 0xff3a4a : 0x44aaff, 2.2, 5);
+  // Свечение под капсулой
+  const glow = new THREE.PointLight(isWarning ? 0xff3a4a : 0xd4a843, 1.8, 4.5);
   glow.position.y = 0.5;
   group.add(glow);
 
-  const numTex = makeCanvasTexture((c, w, h) => {
-    c.fillStyle = isWarning ? '#ff3a4a' : '#4ff0ff';
-    c.font = 'bold 80px monospace';
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    c.fillText(String(index + 1).padStart(2, '0'), w / 2, h / 2);
-  }, 128, 128);
-  const numMat = new THREE.MeshBasicMaterial({ map: numTex, transparent: true });
-  const numPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.5), numMat);
-  numPlane.position.set(0, 3.5, 0);
-  group.add(numPlane);
+  // Вертикальные золотые полоски-оберег по бокам
+  for (let i = 0; i < 4; i++) {
+    const a = i * Math.PI / 2 + Math.PI / 4;
+    const stripe = new THREE.Mesh(
+      new THREE.BoxGeometry(0.04, 2.2, 0.04),
+      new THREE.MeshBasicMaterial({ color: isWarning ? C.redBright : C.gold, transparent: true, opacity: 0.6 })
+    );
+    stripe.position.set(Math.cos(a) * 0.75, 1.5, Math.sin(a) * 0.75);
+    group.add(stripe);
+  }
 
   return group;
 }
@@ -384,39 +687,90 @@ function buildCapsule(index) {
 function buildDomovoi() {
   const group = new THREE.Group();
 
-  // тело
+  // Тело — резная сфера
+  const bodyTex = makeCanvasTexture((c, w, h) => {
+    c.fillStyle = '#0e1220';
+    c.fillRect(0, 0, w, h);
+    // волокна
+    for (let i = 0; i < 40; i++) {
+      c.strokeStyle = `rgba(212,168,67,${0.15 + Math.random() * 0.15})`;
+      c.lineWidth = 1;
+      c.beginPath();
+      const x = Math.random() * w;
+      c.moveTo(x, 0);
+      c.bezierCurveTo(x + 20, h * 0.3, x - 20, h * 0.7, x, h);
+      c.stroke();
+    }
+    // узоры
+    for (let i = 0; i < 6; i++) {
+      drawDiamond(c, Math.random() * w, Math.random() * h, 8, 'rgba(192,32,48,0.5)');
+    }
+  }, 256, 256);
+
   const body = new THREE.Mesh(
-    new THREE.SphereGeometry(0.4, 20, 16),
+    new THREE.SphereGeometry(0.42, 20, 16),
     new THREE.MeshStandardMaterial({
-      color: 0x1a2a44, metalness: 0.8, roughness: 0.45,
-      emissive: 0x081420, emissiveIntensity: 0.5,
+      map: bodyTex,
+      color: 0xffffff,
+      metalness: 0.5,
+      roughness: 0.55,
+      emissive: 0x0a0a14,
+      emissiveIntensity: 0.4,
     })
   );
   body.scale.set(1, 1.1, 0.95);
   group.add(body);
 
-  // глаза
-  const eyeGeo = new THREE.SphereGeometry(0.09, 12, 12);
-  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x4ff0ff });
+  // Глаза — светящиеся циан
+  const eyeGeo = new THREE.SphereGeometry(0.08, 12, 12);
+  const eyeMat = new THREE.MeshBasicMaterial({ color: C.cyan });
   const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
-  eyeL.position.set(-0.15, 0.1, 0.34);
+  eyeL.position.set(-0.14, 0.12, 0.36);
   group.add(eyeL);
   const eyeR = new THREE.Mesh(eyeGeo, eyeMat);
-  eyeR.position.set(0.15, 0.1, 0.34);
+  eyeR.position.set(0.14, 0.12, 0.36);
   group.add(eyeR);
 
-  // клюв
-  const beak = new THREE.Mesh(
-    new THREE.ConeGeometry(0.09, 0.16, 4),
-    new THREE.MeshStandardMaterial({ color: 0xff8a1a, metalness: 0.6, roughness: 0.4 })
-  );
-  beak.position.set(0, -0.03, 0.42);
-  beak.rotation.x = Math.PI / 2;
-  group.add(beak);
+  // Борода — 4 золотистых цилиндра
+  const beardMat = new THREE.MeshStandardMaterial({ color: 0x8a6a2a, metalness: 0.3, roughness: 0.8 });
+  for (let i = 0; i < 4; i++) {
+    const beard = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.03, 0.25, 6), beardMat);
+    beard.position.set(-0.12 + i * 0.08, -0.15, 0.38);
+    beard.rotation.x = 0.15;
+    beard.rotation.z = (i - 1.5) * 0.08;
+    group.add(beard);
+  }
 
-  // крылья
+  // Шапка-конус с меховой опушкой
+  const hatMat = new THREE.MeshStandardMaterial({
+    color: C.coal, metalness: 0.4, roughness: 0.7,
+    emissive: 0x0a0a14, emissiveIntensity: 0.3,
+  });
+  const hat = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.6, 8), hatMat);
+  hat.position.y = 0.55;
+  group.add(hat);
+
+  // меховая опушка шапки
+  const furMat = new THREE.MeshStandardMaterial({ color: 0x3a2a18, metalness: 0.2, roughness: 0.9 });
+  const fur = new THREE.Mesh(new THREE.TorusGeometry(0.33, 0.06, 8, 20), furMat);
+  fur.rotation.x = Math.PI / 2;
+  fur.position.y = 0.32;
+  group.add(fur);
+
+  // Золотой оберег на груди
+  const amulet = new THREE.Mesh(
+    new THREE.CircleGeometry(0.1, 8),
+    new THREE.MeshBasicMaterial({ color: C.gold, transparent: true, opacity: 0.85 })
+  );
+  amulet.position.set(0, -0.05, 0.38);
+  group.add(amulet);
+
+  // Крылья
+  const wingMat = new THREE.MeshStandardMaterial({
+    color: 0x0f1e35, metalness: 0.6, roughness: 0.5,
+    emissive: 0x050a15, emissiveIntensity: 0.5,
+  });
   const wingGeo = new THREE.BoxGeometry(0.14, 0.42, 0.05);
-  const wingMat = new THREE.MeshStandardMaterial({ color: 0x0f1e35, metalness: 0.7, roughness: 0.5 });
   const wingL = new THREE.Mesh(wingGeo, wingMat);
   wingL.position.set(-0.36, -0.06, -0.02);
   wingL.rotation.z = 0.35;
@@ -426,23 +780,8 @@ function buildDomovoi() {
   wingR.rotation.z = -0.35;
   group.add(wingR);
 
-  // антенна
-  const antenna = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.012, 0.012, 0.28, 4),
-    new THREE.MeshStandardMaterial({ color: 0x556677, metalness: 0.7 })
-  );
-  antenna.position.y = 0.47;
-  group.add(antenna);
-
-  const antLight = new THREE.Mesh(
-    new THREE.SphereGeometry(0.06, 10, 10),
-    new THREE.MeshBasicMaterial({ color: 0xffcc66 })
-  );
-  antLight.position.y = 0.64;
-  group.add(antLight);
-
-  // свечение
-  const glow = new THREE.PointLight(0x66ddff, 1.2, 3.5);
+  // Свечение
+  const glow = new THREE.PointLight(C.cyan, 1.2, 3.5);
   glow.position.z = 0.3;
   group.add(glow);
 
@@ -456,7 +795,6 @@ async function collapseTo2D(world3d) {
   if (game.transitioning) return;
   game.transitioning = true;
   closeDialogue();
-  console.log('[transition] collapse start');
 
   game.state.last3DPos = { x: world3d.pos.x, z: world3d.pos.z };
 
@@ -515,13 +853,11 @@ async function collapseTo2D(world3d) {
   await new Promise(r => setTimeout(r, 650));
 
   game.transitioning = false;
-  console.log('[transition] collapse done');
 }
 
 async function inflateTo3D(world2d) {
   if (game.transitioning) return;
   game.transitioning = true;
-  console.log('[transition] inflate start');
 
   overlay.style.transition = 'opacity 0.35s ease';
   overlay.style.background = 'black';
@@ -558,7 +894,7 @@ async function inflateTo3D(world2d) {
   ).multiplyScalar(dist);
   const endPos = new THREE.Vector3(p.x, 1.7, p.z).add(off);
   const endFov = 60;
-  const endFogDensity = 0.018;
+  const endFogDensity = 0.02;
   const endScaleY = 1;
 
   overlay.style.transition = 'opacity 0.9s ease';
@@ -584,11 +920,10 @@ async function inflateTo3D(world2d) {
 
   overlay.style.opacity = '0';
   game.transitioning = false;
-  console.log('[transition] inflate done');
 }
 
 /* =========================================================
-   WORLD 3D — КРИОЗАЛ + ДОМОВОЙ
+   WORLD 3D — КРИОЗАЛ (славянская стилизация)
    ========================================================= */
 class World3D {
   constructor(game) { this.game = game; this.is3D = true; }
@@ -602,8 +937,8 @@ class World3D {
     g.state.started = true;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x02040a);
-    scene.fog = new THREE.FogExp2(0x02040a, 0.018);
+    scene.background = new THREE.Color(0x04060c);
+    scene.fog = new THREE.FogExp2(0x04060c, 0.018);
     this.scene3 = scene;
 
     this.camera = new THREE.PerspectiveCamera(60, g.w / g.h, 0.1, 300);
@@ -611,60 +946,76 @@ class World3D {
     this.camera.lookAt(0, 1.7, 8);
 
     /* ---- lighting ---- */
-    scene.add(new THREE.HemisphereLight(0x88bbff, 0x0a1020, 0.5));
-    const mainDir = new THREE.DirectionalLight(0xaaccff, 0.5);
+    scene.add(new THREE.HemisphereLight(0x88bbff, 0x0a0a14, 0.45));
+    const mainDir = new THREE.DirectionalLight(0xd4b890, 0.55);
     mainDir.position.set(5, 15, 10);
     scene.add(mainDir);
-    scene.add(new THREE.AmbientLight(0x1a2a4a, 0.4));
+    scene.add(new THREE.AmbientLight(0x1a1a24, 0.45));
 
     /* ---- stars ---- */
     this._buildStars(scene);
 
-    /* ---- floor ---- */
+    /* ---- floor с половицами ---- */
+    const floorTex = makeFloorTexture();
+    floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+    floorTex.repeat.set(4, 5);
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(24, 32),
-      new THREE.MeshStandardMaterial({ color: 0x081228, roughness: 0.85, metalness: 0.3 })
+      new THREE.MeshStandardMaterial({
+        map: floorTex,
+        color: 0xffffff,
+        roughness: 0.85,
+        metalness: 0.3,
+        emissive: 0x0a0a14,
+        emissiveIntensity: 0.2,
+      })
     );
     floor.rotation.x = -Math.PI / 2;
     scene.add(floor);
 
-    const grid = new THREE.GridHelper(32, 32, 0x2a6cff, 0x0e1c3a);
-    grid.material.transparent = true;
-    grid.material.opacity = 0.4;
-    grid.position.y = 0.01;
-    scene.add(grid);
+    /* ---- walls с резьбой ---- */
+    const wallTexA = makeWallTexture(1);
+    const wallTexB = makeWallTexture(2);
+    wallTexA.wrapS = wallTexA.wrapT = THREE.RepeatWrapping;
+    wallTexB.wrapS = wallTexB.wrapT = THREE.RepeatWrapping;
+    wallTexA.repeat.set(4, 1);
+    wallTexB.repeat.set(3, 1);
 
-    /* ---- walls ---- */
-    const wallMat = new THREE.MeshStandardMaterial({
-      color: 0x0a1730, emissive: 0x050a18, emissiveIntensity: 0.6,
-      roughness: 0.75, metalness: 0.5,
-    });
     const wallGeoLR = new THREE.BoxGeometry(WALL_T, WALL_H, 32);
     const wallGeoFB = new THREE.BoxGeometry(24, WALL_H, WALL_T);
 
+    const wallMatA = new THREE.MeshStandardMaterial({
+      map: wallTexA, roughness: 0.8, metalness: 0.4,
+      emissive: 0x0a0a14, emissiveIntensity: 0.4,
+    });
+    const wallMatB = new THREE.MeshStandardMaterial({
+      map: wallTexB, roughness: 0.8, metalness: 0.4,
+      emissive: 0x0a0a14, emissiveIntensity: 0.4,
+    });
+
     this.wallMeshes = [];
 
-    const leftWall = new THREE.Mesh(wallGeoLR, wallMat);
+    const leftWall = new THREE.Mesh(wallGeoLR, wallMatA);
     leftWall.position.set(ROOM.minX, WALL_H / 2, 0);
     scene.add(leftWall); this.wallMeshes.push(leftWall);
 
-    const rightWall = new THREE.Mesh(wallGeoLR, wallMat);
+    const rightWall = new THREE.Mesh(wallGeoLR, wallMatB);
     rightWall.position.set(ROOM.maxX, WALL_H / 2, 0);
     scene.add(rightWall); this.wallMeshes.push(rightWall);
 
-    const backWall = new THREE.Mesh(wallGeoFB, wallMat);
+    const backWall = new THREE.Mesh(wallGeoFB, wallMatB);
     backWall.position.set(0, WALL_H / 2, ROOM.minZ);
     scene.add(backWall); this.wallMeshes.push(backWall);
 
-    const frontWall = new THREE.Mesh(wallGeoFB, wallMat);
+    const frontWall = new THREE.Mesh(wallGeoFB, wallMatA);
     frontWall.position.set(0, WALL_H / 2, ROOM.maxZ);
     scene.add(frontWall); this.wallMeshes.push(frontWall);
 
-    /* ---- emergency strips ---- */
-    const stripMat = new THREE.MeshBasicMaterial({ color: 0xff3a4a, transparent: true, opacity: 0.55 });
-    const stripGeoLR = new THREE.BoxGeometry(0.05, 0.08, 32);
-    const stripGeoFB = new THREE.BoxGeometry(24, 0.08, 0.05);
-    for (const y of [0.05, 0.35]) {
+    /* ---- обережные пояса (красные полосы) ---- */
+    const stripMat = new THREE.MeshBasicMaterial({ color: C.red, transparent: true, opacity: 0.55 });
+    const stripGeoLR = new THREE.BoxGeometry(0.06, 0.1, 32);
+    const stripGeoFB = new THREE.BoxGeometry(24, 0.1, 0.06);
+    for (const y of [0.1, 0.4]) {
       const sL = new THREE.Mesh(stripGeoLR, stripMat); sL.position.set(ROOM.minX + 0.28, y, 0); scene.add(sL);
       const sR = new THREE.Mesh(stripGeoLR, stripMat); sR.position.set(ROOM.maxX - 0.28, y, 0); scene.add(sR);
       const sB = new THREE.Mesh(stripGeoFB, stripMat); sB.position.set(0, y, ROOM.minZ + 0.28); scene.add(sB);
@@ -672,8 +1023,8 @@ class World3D {
     }
     this.stripMat = stripMat;
 
-    /* ---- pipes ---- */
-    const pipeMat = new THREE.MeshStandardMaterial({ color: 0x2a3a5a, metalness: 0.8, roughness: 0.35 });
+    /* ---- трубы ---- */
+    const pipeMat = new THREE.MeshStandardMaterial({ color: 0x3a2a18, metalness: 0.8, roughness: 0.45 });
     for (let i = 0; i < 3; i++) {
       const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 24, 8), pipeMat);
       pipe.rotation.z = Math.PI / 2;
@@ -681,13 +1032,13 @@ class World3D {
       scene.add(pipe);
     }
 
-    /* ---- signs ---- */
-    const rusPanel = makeTextTexture('РУСЬ-7', { color: '#4ff0ff', fontSize: 110, height: 1.6 });
-    rusPanel.position.set(0, 3.4, ROOM.minZ + 0.28);
+    /* ---- надписи (вязь) ---- */
+    const rusPanel = makeTextTexture('РУСЬ · КОВЧЕГ 7', { color: '#d4a843', fontSize: 100, height: 1.5 });
+    rusPanel.position.set(0, 3.6, ROOM.minZ + 0.28);
     scene.add(rusPanel);
 
-    const cryoPanel = makeTextTexture('КРИООТСЕК · 2', { color: '#ff3a4a', fontSize: 70, height: 1.0 });
-    cryoPanel.position.set(0, 3.4, ROOM.maxZ - 0.28);
+    const cryoPanel = makeTextTexture('СОН-ПАЛАТА · 2', { color: '#ff3a4a', fontSize: 70, height: 1.0 });
+    cryoPanel.position.set(0, 3.6, ROOM.maxZ - 0.28);
     cryoPanel.rotation.y = Math.PI;
     scene.add(cryoPanel);
 
@@ -696,32 +1047,17 @@ class World3D {
     svarogPanel.rotation.y = -Math.PI / 2;
     scene.add(svarogPanel);
 
-    /* ---- left data screen ---- */
-    const screenTex = makeCanvasTexture((c, w, h) => {
-      c.fillStyle = '#02060e';
-      c.fillRect(0, 0, w, h);
-      c.strokeStyle = '#ff8a1a';
-      c.lineWidth = 3;
-      c.strokeRect(10, 10, w - 20, h - 20);
-      c.fillStyle = '#ff8a1a';
-      c.font = 'bold 26px monospace';
-      c.textAlign = 'center';
-      c.fillText('АВАРИЙНЫЙ РЕЖИМ', w / 2, 70);
-      c.fillStyle = '#4ff0ff';
-      c.font = 'bold 22px monospace';
-      c.fillText('ЭКИПАЖ: 0', w / 2, 120);
-      c.fillText('ВЫЖИВШИХ: 1', w / 2, 155);
-      c.fillStyle = '#ff3a4a';
-      c.font = 'bold 20px monospace';
-      c.fillText('РЕАКТОР: 12%', w / 2, 200);
-    }, 512, 256);
-    const screenMat = new THREE.MeshBasicMaterial({ map: screenTex });
-    const screen = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 1.1), screenMat);
-    screen.position.set(ROOM.minX + 0.28, 3.0, 8);
-    screen.rotation.y = Math.PI / 2;
-    scene.add(screen);
+    /* ---- экран на стене ---- */
+    const wallScreenTex = makeWallScreenTexture();
+    const wallScreen = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.4, 1.2),
+      new THREE.MeshBasicMaterial({ map: wallScreenTex })
+    );
+    wallScreen.position.set(ROOM.minX + 0.28, 3.0, 8);
+    wallScreen.rotation.y = Math.PI / 2;
+    scene.add(wallScreen);
 
-    /* ---- capsules ---- */
+    /* ---- капсулы (сон-колыбели) ---- */
     for (let i = 0; i < CAPSULE_Z.length; i++) {
       const cap = buildCapsule(i);
       cap.position.set(CAPSULES_X, 0, CAPSULE_Z[i]);
@@ -729,62 +1065,91 @@ class World3D {
       scene.add(cap);
 
       if (i === 1) {
-        const warn = makeTextTexture('НЕ ВХОДИ', { color: '#ff3a4a', fontSize: 60, height: 0.55 });
+        const warn = makeTextTexture('НЕ ВХОДИ', { color: '#ff3a4a', fontSize: 56, height: 0.5 });
         warn.position.set(CAPSULES_X + 1.2, 1.7, CAPSULE_Z[i]);
         warn.rotation.y = Math.PI / 2;
         scene.add(warn);
       }
     }
 
-    /* ---- pult ---- */
-    const pultBase = new THREE.Mesh(
-      new THREE.BoxGeometry(2.2, 1.0, 1.0),
-      new THREE.MeshStandardMaterial({ color: 0x0a1a30, metalness: 0.7, roughness: 0.4 })
-    );
-    pultBase.position.set(PULT_POS.x, 0.5, PULT_POS.z);
+    /* ---- ПЕЧЬ-ПУЛЬТ ---- */
+    // Основание печи — массивный блок
+    const pultBaseMat = new THREE.MeshStandardMaterial({
+      color: 0x1a1410,
+      metalness: 0.5,
+      roughness: 0.75,
+      emissive: 0x0a0a08,
+      emissiveIntensity: 0.3,
+    });
+    const pultBase = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.4, 1.4), pultBaseMat);
+    pultBase.position.set(PULT_POS.x, 0.7, PULT_POS.z);
     scene.add(pultBase);
 
-    const pultTex = makeCanvasTexture((c, w, h) => {
-      c.fillStyle = '#04101e';
-      c.fillRect(0, 0, w, h);
-      c.strokeStyle = '#4ff0ff';
-      c.lineWidth = 3;
-      c.strokeRect(6, 6, w - 12, h - 12);
-      c.fillStyle = '#4ff0ff';
-      c.font = 'bold 22px monospace';
-      c.textAlign = 'center';
-      c.fillText('РУСЬ-7 · ПУЛЬТ-02', w / 2, 40);
-      c.fillStyle = '#ff3a4a';
-      c.font = 'bold 18px monospace';
-      c.fillText('СВЯЗЬ С ЗЕМЛЁЙ: ПОТЕРЯНА', w / 2, 90);
-      c.fillStyle = '#88ffaa';
-      c.font = 'bold 16px monospace';
-      c.fillText('> инициализация пробуждения...', w / 2, 130);
-      c.fillText('> Сварог: ядро активно', w / 2, 155);
-      c.fillText('> Сварог: найди домового', w / 2, 180);
-    }, 512, 256);
+    // Свод печи (скруглённый верх)
+    const archMat = new THREE.MeshStandardMaterial({
+      color: 0x1a1410, metalness: 0.5, roughness: 0.7,
+    });
+    const arch = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.7, 0.7, 1.2, 16, 1, false, 0, Math.PI),
+      archMat
+    );
+    arch.rotation.z = Math.PI / 2;
+    arch.rotation.y = Math.PI / 2;
+    arch.position.set(PULT_POS.x, 1.4, PULT_POS.z);
+    scene.add(arch);
+
+    // Устье — экран
+    const pultTex = makePultScreenTexture();
     const pultScreen = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.9, 0.95),
+      new THREE.PlaneGeometry(1.6, 0.9),
       new THREE.MeshBasicMaterial({ map: pultTex, transparent: true })
     );
-    pultScreen.position.set(PULT_POS.x - 0.51, 1.3, PULT_POS.z);
+    pultScreen.position.set(PULT_POS.x - 0.71, 1.15, PULT_POS.z);
     pultScreen.rotation.y = -Math.PI / 2;
-    pultScreen.rotation.z = -0.15;
     scene.add(pultScreen);
 
-    for (let i = 0; i < 6; i++) {
-      const btn = new THREE.Mesh(
-        new THREE.BoxGeometry(0.15, 0.03, 0.15),
-        new THREE.MeshBasicMaterial({ color: i % 2 === 0 ? 0x4ff0ff : 0xff3a4a })
+    // Свечение устья
+    const pultGlow = new THREE.PointLight(C.goldBright, 2.5, 5);
+    pultGlow.position.set(PULT_POS.x - 0.6, 1.15, PULT_POS.z);
+    scene.add(pultGlow);
+    this.pultGlow = pultGlow;
+
+    // резной наличник вокруг устья
+    const nalichnikMat = new THREE.MeshStandardMaterial({
+      color: 0x2a1a10, metalness: 0.6, roughness: 0.6,
+      emissive: C.gold, emissiveIntensity: 0.1,
+    });
+    for (let i = 0; i < 8; i++) {
+      const block = new THREE.Mesh(
+        new THREE.BoxGeometry(0.08, 0.08, 0.08),
+        nalichnikMat
       );
-      btn.position.set(PULT_POS.x - 0.6, 1.03, PULT_POS.z - 0.4 + i * 0.16);
+      block.position.set(
+        PULT_POS.x - 0.72,
+        0.7 + (i < 4 ? 0 : 0.9),
+        PULT_POS.z - 0.8 + (i % 4) * 0.53
+      );
+      scene.add(block);
+    }
+
+    // Кнопки-угли
+    for (let i = 0; i < 4; i++) {
+      const btn = new THREE.Mesh(
+        new THREE.BoxGeometry(0.12, 0.03, 0.12),
+        new THREE.MeshBasicMaterial({ color: i % 2 === 0 ? C.gold : C.redBright })
+      );
+      btn.position.set(PULT_POS.x - 0.6, 0.72, PULT_POS.z - 0.3 + i * 0.2);
       scene.add(btn);
     }
 
-    /* ---- tablet ---- */
+    /* ---- планшет ---- */
     const tablet = new THREE.Mesh(
       new THREE.BoxGeometry(0.5, 0.04, 0.35),
-      new THREE.MeshStandardMaterial({ color: 0x44aaff, emissive: 0x2277ff, emissiveIntensity: 1.5 })
+      new THREE.MeshStandardMaterial({
+        color: 0xd4a843,
+        emissive: 0xffbb33,
+        emissiveIntensity: 1.8,
+      })
     );
     tablet.position.set(2.5, 0.03, 3);
     tablet.rotation.y = 0.5;
@@ -792,7 +1157,7 @@ class World3D {
     this.tablet = tablet;
     this.tabletRead = false;
 
-    /* ---- emergency corner lights ---- */
+    /* ---- аварийные огни в углах ---- */
     this.emergencyLights = [];
     const corners = [
       [ROOM.minX + 1.5, 4.2, ROOM.minZ + 1.5],
@@ -801,62 +1166,120 @@ class World3D {
       [ROOM.maxX - 1.5, 4.2, ROOM.maxZ - 1.5],
     ];
     for (const [x, y, z] of corners) {
-      const light = new THREE.PointLight(0xff2a3a, 3, 14);
+      const light = new THREE.PointLight(0xff2a3a, 2.5, 14);
       light.position.set(x, y, z);
       scene.add(light);
       this.emergencyLights.push(light);
     }
 
-    /* ---- rift ---- */
-    this.rift = new THREE.Mesh(
-      new THREE.TorusGeometry(1.2, 0.18, 16, 48),
-      new THREE.MeshStandardMaterial({ color: 0x2277ff, emissive: 0x2277ff, emissiveIntensity: 1.2 })
-    );
+    /* ---- РАЗЛОМ — КАЛИНОВ МОСТ (огненное кольцо с рунами) ---- */
+    this.rift = new THREE.Group();
     this.rift.position.copy(RIFT_POS);
-    this.rift.rotation.x = Math.PI / 2;
-    scene.add(this.rift);
-    this.riftMat = this.rift.material;
 
-    this.riftLight = new THREE.PointLight(0x44aaff, 5, 20);
+    // Основное кольцо — огненное
+    const riftRingMat = new THREE.MeshBasicMaterial({
+      color: 0xff8844,
+      transparent: true,
+      opacity: 0.9,
+    });
+    this.riftRing = new THREE.Mesh(new THREE.TorusGeometry(1.2, 0.15, 12, 48), riftRingMat);
+    this.riftRing.rotation.x = Math.PI / 2;
+    this.rift.add(this.riftRing);
+    this.riftMat = riftRingMat;
+
+    // Руны по кругу (8 плоскостей с текстурами рун)
+    this.runeMeshes = [];
+    const runes = ['ᚱ', 'ᚨ', 'ᛞ', 'ᛊ', 'ᛉ', 'ᛏ', 'ᛒ', 'ᚦ'];
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const runeTex = makeCanvasTexture((c, w, h) => {
+        c.clearRect(0, 0, w, h);
+        c.fillStyle = '#ff8844';
+        c.font = 'bold 64px monospace';
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        c.fillText(runes[i], w / 2, h / 2);
+      }, 64, 64);
+      const runeMesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.35, 0.35),
+        new THREE.MeshBasicMaterial({ map: runeTex, transparent: true, opacity: 0.85 })
+      );
+      runeMesh.position.set(Math.cos(a) * 1.55, 0.02, Math.sin(a) * 1.55);
+      runeMesh.rotation.x = -Math.PI / 2;
+      this.rift.add(runeMesh);
+      this.runeMeshes.push(runeMesh);
+    }
+
+    // Внутренний диск — тёмный
+    const riftInner = new THREE.Mesh(
+      new THREE.CircleGeometry(1.05, 32),
+      new THREE.MeshBasicMaterial({ color: 0x1a0808, transparent: true, opacity: 0.6 })
+    );
+    riftInner.rotation.x = -Math.PI / 2;
+    riftInner.position.y = 0.01;
+    this.rift.add(riftInner);
+
+    scene.add(this.rift);
+
+    // Свет разлома
+    this.riftLight = new THREE.PointLight(0xff8844, 4, 18);
     this.riftLight.position.set(RIFT_POS.x, 0.7, RIFT_POS.z);
     scene.add(this.riftLight);
 
+    // Столб огня
     this.riftBeam = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.35, 0.05, 15, 8, 1, true),
-      new THREE.MeshBasicMaterial({ color: 0x44aaff, transparent: true, opacity: 0.14, side: THREE.DoubleSide })
+      new THREE.CylinderGeometry(0.4, 0.1, 14, 8, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0xffaa44, transparent: true, opacity: 0.18, side: THREE.DoubleSide })
     );
-    this.riftBeam.position.set(RIFT_POS.x, 7.5, RIFT_POS.z);
+    this.riftBeam.position.set(RIFT_POS.x, 7, RIFT_POS.z);
     scene.add(this.riftBeam);
 
+    // Сфера-оболочка
     this.riftShell = new THREE.Mesh(
-      new THREE.SphereGeometry(1.5, 32, 16),
-      new THREE.MeshBasicMaterial({ color: 0x66ddff, transparent: true, opacity: 0, side: THREE.DoubleSide })
+      new THREE.SphereGeometry(1.5, 24, 12),
+      new THREE.MeshBasicMaterial({ color: 0xffaa66, transparent: true, opacity: 0, side: THREE.DoubleSide })
     );
-    this.riftShell.position.copy(RIFT_POS);
-    this.riftShell.position.y = 0.7;
+    this.riftShell.position.set(RIFT_POS.x, 0.7, RIFT_POS.z);
     scene.add(this.riftShell);
 
+    // Волна активации
     this.riftWave = new THREE.Mesh(
       new THREE.RingGeometry(1.2, 1.5, 48),
-      new THREE.MeshBasicMaterial({ color: 0x66ddff, transparent: true, opacity: 0, side: THREE.DoubleSide })
+      new THREE.MeshBasicMaterial({ color: 0xffaa66, transparent: true, opacity: 0, side: THREE.DoubleSide })
     );
     this.riftWave.rotation.x = -Math.PI / 2;
-    this.riftWave.position.copy(RIFT_POS);
-    this.riftWave.position.y = 0.06;
+    this.riftWave.position.set(RIFT_POS.x, 0.06, RIFT_POS.z);
     scene.add(this.riftWave);
     this.riftWaveT = -1;
 
-    /* ---- klubok ---- */
+    /* ---- КЛУБОК ---- */
     this.klubokMesh = new THREE.Group();
-    const ball = new THREE.Mesh(
-      new THREE.SphereGeometry(0.35, 16, 16),
-      new THREE.MeshStandardMaterial({ color: 0xffcc66, emissive: 0xffaa33, emissiveIntensity: 2 })
-    );
+    const ballMat = new THREE.MeshStandardMaterial({
+      color: 0xd4a843,
+      emissive: 0xffaa33,
+      emissiveIntensity: 2.2,
+      roughness: 0.6,
+      metalness: 0.2,
+    });
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.35, 20, 16), ballMat);
     this.klubokMesh.add(ball);
-    const klubokLight = new THREE.PointLight(0xffcc66, 1.5, 4);
+
+    // Обмотка-нити
+    for (let i = 0; i < 3; i++) {
+      const thread = new THREE.Mesh(
+        new THREE.TorusGeometry(0.36, 0.02, 6, 24),
+        new THREE.MeshBasicMaterial({ color: 0xffdd66, transparent: true, opacity: 0.7 })
+      );
+      thread.rotation.x = Math.PI / 2 + i * 0.5;
+      thread.rotation.y = i * 1.1;
+      this.klubokMesh.add(thread);
+    }
+
+    const klubokLight = new THREE.PointLight(0xffcc66, 1.8, 4.5);
     this.klubokMesh.add(klubokLight);
     scene.add(this.klubokMesh);
 
+    // Нить от клубка к игроку
     this.thread = new THREE.Mesh(
       new THREE.CylinderGeometry(0.02, 0.02, 1, 4),
       new THREE.MeshBasicMaterial({ color: 0xffcc66, transparent: true, opacity: 0.8 })
@@ -864,46 +1287,75 @@ class World3D {
     this.thread.visible = false;
     scene.add(this.thread);
 
-    /* ---- domovoi ---- */
+    /* ---- ДОМОВОЙ ---- */
     this.domovoi = buildDomovoi();
     this.domovoi.position.set(DOMOVOI_POS.x, DOMOVOI_POS.y, DOMOVOI_POS.z);
     this.domovoi.rotation.y = -Math.PI / 2;
     scene.add(this.domovoi);
 
-    /* ---- iskra (если материализована) ---- */
+    /* ---- ИСКРА (если материализована) ---- */
     this.iskraMesh = null;
     if (g.state.flags.iskraMaterialized) {
       this.iskraMesh = new THREE.Group();
       const iskraBall = new THREE.Mesh(
-        new THREE.SphereGeometry(0.18, 14, 14),
+        new THREE.SphereGeometry(0.16, 14, 14),
         new THREE.MeshStandardMaterial({
-          color: 0xffffff, emissive: 0x88ccff, emissiveIntensity: 4,
+          color: 0xffffff, emissive: 0xffcc66, emissiveIntensity: 5,
         })
       );
       this.iskraMesh.add(iskraBall);
-      const iskraLight = new THREE.PointLight(0x88ccff, 2.5, 4);
+
+      // сварга-оберег вокруг искры
+      for (let i = 0; i < 4; i++) {
+        const a = i * Math.PI / 2;
+        const ray = new THREE.Mesh(
+          new THREE.BoxGeometry(0.04, 0.04, 0.4),
+          new THREE.MeshBasicMaterial({ color: 0xffcc66, transparent: true, opacity: 0.7 })
+        );
+        ray.position.set(Math.cos(a) * 0.25, 0, Math.sin(a) * 0.25);
+        ray.rotation.y = a;
+        this.iskraMesh.add(ray);
+      }
+
+      const iskraLight = new THREE.PointLight(0xffcc66, 2.5, 4);
       this.iskraMesh.add(iskraLight);
       scene.add(this.iskraMesh);
     }
 
-    /* ---- player ---- */
+    /* ---- ИГРОК ---- */
     this.player = new THREE.Group();
     const playerBodyMat = new THREE.MeshStandardMaterial({
-      color: 0x66ddff, emissive: 0x114466, emissiveIntensity: 1.4,
+      color: 0x66ddff,
+      emissive: 0x114466,
+      emissiveIntensity: 1.4,
     });
     this.playerBodyMat = playerBodyMat;
     const bodyMesh = new THREE.Mesh(new THREE.BoxGeometry(1.1, 2, 1.1), playerBodyMat);
     bodyMesh.position.y = 1;
     this.player.add(bodyMesh);
-    const playerGlow = new THREE.PointLight(0x66ddff, 1.5, 5);
-    playerGlow.position.y = 1.2;
-    this.player.add(playerGlow);
+
+    // визор
     const visor = new THREE.Mesh(
       new THREE.BoxGeometry(0.9, 0.3, 0.05),
       new THREE.MeshBasicMaterial({ color: 0x88ffff })
     );
     visor.position.set(0, 1.7, 0.56);
     this.player.add(visor);
+
+    // свечение
+    const playerGlow = new THREE.PointLight(0x66ddff, 1.5, 5);
+    playerGlow.position.y = 1.2;
+    this.player.add(playerGlow);
+
+    // "свеча" над головой (дух)
+    const candle = new THREE.Mesh(
+      new THREE.SphereGeometry(0.1, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffdd66 })
+    );
+    candle.position.y = 2.3;
+    this.player.add(candle);
+    this.playerCandle = candle;
+
     scene.add(this.player);
 
     /* ---- state ---- */
@@ -921,8 +1373,8 @@ class World3D {
     this.lastDomovoiHint = 0;
     this.lastTabletHint = 0;
 
-    hint(isFirst ? 'Ты один. Криозал «Русь-7». Осмотрись' : 'Снова в Яви', 4000);
-    console.log('[world3d] entered · v5');
+    hint(isFirst ? 'Сон-палата «Русь-Ковчег 7». Осмотрись' : 'Снова в Яви', 4000);
+    console.log('[world3d] entered · v6 slavic');
   }
 
   _buildStars(scene) {
@@ -939,7 +1391,7 @@ class World3D {
       );
     }
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    const mat = new THREE.PointsMaterial({ color: 0xaaccff, size: 0.6, transparent: true, opacity: 0.85 });
+    const mat = new THREE.PointsMaterial({ color: 0xd4b890, size: 0.6, transparent: true, opacity: 0.8 });
     scene.add(new THREE.Points(geo, mat));
   }
 
@@ -995,13 +1447,12 @@ class World3D {
     dirVec.normalize();
     this.thread.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirVec);
     this.thread.visible = true;
-    this.thread.material.color.set(0x44aaff);
+    this.thread.material.color.set(0xffaa44);
   }
 
   pickupKlubok() {
     this.klubokState = 'carried';
-    hint('Клубок у тебя. Целься в разлом и нажми F', 4000);
-    console.log('[klubok] picked up');
+    hint('Клубок-путеводитель у тебя. Целься в разлом и нажми F', 4000);
   }
 
   throwKlubok() {
@@ -1020,14 +1471,12 @@ class World3D {
 
     this.klubokState = 'thrown';
     this.klubokAnim = { start: start.clone(), target, startTime: performance.now(), duration: 750 };
-    console.log('[klubok] thrown');
   }
 
   sealKlubok() {
     this.klubokState = 'sealed';
     this.riftWaveT = 0;
-    hint('Портал открыт. Подойди к разлому и нажми E', 5000);
-    console.log('[rift] activated · klubok sealed');
+    hint('Калинов мост открыт. Подойди к разлому и нажми E', 5000);
   }
 
   updateKlubok(dt) {
@@ -1072,7 +1521,6 @@ class World3D {
           this.klubokMesh.position.x - RIFT_POS.x,
           this.klubokMesh.position.z - RIFT_POS.z
         );
-        console.log('[klubok] landed, dist:', dRift.toFixed(2));
         if (dRift < RIFT_ACTIVATION_RADIUS) {
           this.sealKlubok();
         } else {
@@ -1107,25 +1555,28 @@ class World3D {
     const sealed = this.klubokState === 'sealed';
 
     if (sealed) {
-      this.riftMat.emissiveIntensity = 4 + Math.sin(this.t * 5) * 1.6;
-      this.riftMat.color.set(0x66ddff);
-      this.riftMat.emissive.set(0x44aaff);
-      this.riftLight.intensity = 18 + Math.sin(this.t * 5) * 6;
-      this.riftLight.color.set(0x66ddff);
-      this.riftBeam.material.opacity = 0.45 + Math.sin(this.t * 4) * 0.12;
-      this.riftBeam.material.color.set(0x66ddff);
-      this.riftShell.material.opacity = 0.12 + Math.sin(this.t * 3) * 0.05;
+      this.riftMat.color.set(0xffcc66);
+      this.riftMat.opacity = 0.9 + Math.sin(this.t * 5) * 0.1;
+      this.riftLight.intensity = 16 + Math.sin(this.t * 5) * 5;
+      this.riftLight.color.set(0xffcc66);
+      this.riftBeam.material.opacity = 0.5 + Math.sin(this.t * 4) * 0.12;
+      this.riftBeam.material.color.set(0xffcc66);
+      this.riftShell.material.opacity = 0.15 + Math.sin(this.t * 3) * 0.06;
     } else {
-      this.riftMat.emissiveIntensity = 1 + Math.sin(this.t * 2) * 0.3;
-      this.riftMat.color.set(0x2277ff);
-      this.riftMat.emissive.set(0x2277ff);
-      this.riftLight.intensity = 5 + Math.sin(this.t * 2) * 1;
-      this.riftLight.color.set(0x44aaff);
-      this.riftBeam.material.opacity = 0.14;
-      this.riftBeam.material.color.set(0x44aaff);
+      this.riftMat.color.set(0xff8844);
+      this.riftMat.opacity = 0.7 + Math.sin(this.t * 2) * 0.15;
+      this.riftLight.intensity = 4 + Math.sin(this.t * 2) * 1;
+      this.riftLight.color.set(0xff8844);
+      this.riftBeam.material.opacity = 0.18;
+      this.riftBeam.material.color.set(0xffaa44);
       this.riftShell.material.opacity = Math.max(0, this.riftShell.material.opacity - dt * 0.5);
     }
-    this.rift.rotation.z = this.t * 0.8;
+    this.riftRing.rotation.z = this.t * 0.6;
+
+    // руны пульсируют
+    for (let i = 0; i < this.runeMeshes.length; i++) {
+      this.runeMeshes[i].material.opacity = 0.6 + Math.sin(this.t * 3 + i) * 0.3;
+    }
 
     if (this.riftWaveT >= 0) {
       this.riftWaveT += dt * 1.4;
@@ -1145,7 +1596,6 @@ class World3D {
     if (!this.domovoi) return;
     this.domovoi.position.y = DOMOVOI_POS.y + Math.sin(this.t * 2) * 0.08;
     this.domovoi.rotation.z = Math.sin(this.t * 1.3) * 0.05;
-    // медленно покачивается, следит за игроком
     const dx = this.pos.x - this.domovoi.position.x;
     const dz = this.pos.z - this.domovoi.position.z;
     const targetAngle = Math.atan2(dx, dz);
@@ -1159,17 +1609,13 @@ class World3D {
       1.6 + Math.sin(this.t * 2.2) * 0.12,
       Math.cos(this.t * 1.5) * 0.6
     );
-    this.iskraMesh.position.set(
-      this.pos.x + offset.x,
-      offset.y,
-      this.pos.z + offset.z
-    );
+    this.iskraMesh.position.set(this.pos.x + offset.x, offset.y, this.pos.z + offset.z);
+    this.iskraMesh.rotation.y = this.t * 1.2;
   }
 
   startDomovoiDialogue() {
     const flags = this.game.state.flags;
 
-    // Приоритет 1: искра найдена, но второй диалог ещё не было
     if (flags.iskraFound && !flags.domovoiSecond) {
       flags.domovoiSecond = true;
       flags.metDomovoi = true;
@@ -1180,27 +1626,23 @@ class World3D {
       ], () => {
         hint('Уровень 1 пройден. Дальше — Печь', 6000);
       });
-      console.log('[domovoi] second dialogue');
       return;
     }
 
-    // Приоритет 2: первая встреча
     if (!flags.metDomovoi) {
       flags.metDomovoi = true;
       startDialogue('ДОМОВОЙ', [
         'Живой?.. Живой!.. Значит, ещё не всё потеряно.',
-        'Экипаж в Нави. Все. Их души застряли между планами.',
-        'Я — домовой станции. Сварог-ИИ разбудил тебя не случайно.',
-        'Возьми клубок у пульта. Брось его в разлом — он откроет дорогу.',
+        'Экипаж в Нави. Все. Их души застряли между мирами.',
+        'Я — домовой ковчега. Сварог-ИИ разбудил тебя не случайно.',
+        'Возьми клубок-путеводитель у печи. Брось в разлом — он откроет дорогу.',
         'В Нави есть то, чего нет в Яви. Найди искру — она покажет путь.',
       ], () => {
-        hint('Клубок — у пульта справа. Разлом — в центре', 5000);
+        hint('Клубок — у печи справа. Разлом — в центре', 5000);
       });
-      console.log('[domovoi] first dialogue');
       return;
     }
 
-    // Default: повторяющаяся подсказка
     startDialogue('ДОМОВОЙ', [
       'Искра ждёт в Нави. Не возвращайся без неё.',
     ]);
@@ -1211,7 +1653,6 @@ class World3D {
     if (dialogue.active) return;
     if (!consumeAction('KeyE')) return;
 
-    // Приоритет 1: домовой рядом
     if (this.domovoi) {
       const d = Math.hypot(
         this.pos.x - this.domovoi.position.x,
@@ -1223,23 +1664,19 @@ class World3D {
       }
     }
 
-    // Приоритет 2: разлом активен
     if (this.klubokState === 'sealed') {
       const d = Math.hypot(this.pos.x - RIFT_POS.x, this.pos.z - RIFT_POS.z);
       if (d < RIFT_INTERACT_RADIUS) {
-        console.log('[input] E → collapse');
         collapseTo2D(this);
         return;
       }
     }
 
-    // Приоритет 3: планшет
     if (!this.tabletRead && this.tablet) {
       const d = Math.hypot(this.pos.x - this.tablet.position.x, this.pos.z - this.tablet.position.z);
       if (d < 1.5) {
         this.tabletRead = true;
-        hint('Сварог: «Криозал. Экипаж молчит. Найди домового у пульта»', 6000);
-        console.log('[tablet] read');
+        hint('Сварог: «Сон-палата. Экипаж молчит. Найди домового у печи»', 6000);
         return;
       }
     }
@@ -1249,12 +1686,10 @@ class World3D {
     this.t += dt;
     const g = this.game;
 
-    // камера-лук
     this.yaw -= look.dx * 0.004;
     this.pitch = clamp(this.pitch + look.dy * 0.003, -0.15, 1.15);
     look.dx = 0; look.dy = 0;
 
-    // движение
     if (!g.transitioning) {
       const { f, r } = getMoveInput();
       const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
@@ -1271,6 +1706,11 @@ class World3D {
       if (moving && this.klubokState !== 'carried' && !dialogue.active) {
         this.player.rotation.y = angleLerp(this.player.rotation.y, Math.atan2(move.x, move.z), Math.min(1, dt * 12));
       }
+
+      // свеча над головой мерцает
+      if (this.playerCandle) {
+        this.playerCandle.scale.setScalar(0.9 + Math.sin(this.t * 8) * 0.1);
+      }
     }
 
     this.updateCamera(dt);
@@ -1279,14 +1719,13 @@ class World3D {
     this.updateDomovoi(dt);
     this.updateIskra(dt);
 
-    // аварийка
-    const emergencyPulse = 2.2 + Math.sin(this.t * 3.4) * 1.4;
+    const emergencyPulse = 2 + Math.sin(this.t * 3.4) * 1.2;
     for (let i = 0; i < this.emergencyLights.length; i++) {
       this.emergencyLights[i].intensity = emergencyPulse + Math.sin(this.t * 3.4 + i) * 0.4;
     }
-    if (this.stripMat) this.stripMat.opacity = 0.4 + Math.sin(this.t * 3.4) * 0.2;
+    if (this.stripMat) this.stripMat.opacity = 0.4 + Math.sin(this.t * 3.4) * 0.15;
 
-    // планшет
+    // подсказки
     if (!this.tabletRead && this.tablet && !dialogue.active) {
       const d = Math.hypot(this.pos.x - this.tablet.position.x, this.pos.z - this.tablet.position.z);
       if (d < 1.5 && this.t - this.lastTabletHint > 3) {
@@ -1294,8 +1733,6 @@ class World3D {
         this.lastTabletHint = this.t;
       }
     }
-
-    // домовой
     if (this.domovoi && !dialogue.active) {
       const d = Math.hypot(this.pos.x - this.domovoi.position.x, this.pos.z - this.domovoi.position.z);
       if (d < 2.5 && this.t - this.lastDomovoiHint > 3) {
@@ -1303,8 +1740,6 @@ class World3D {
         this.lastDomovoiHint = this.t;
       }
     }
-
-    // разлом
     if (this.klubokState === 'sealed' && !dialogue.active) {
       const d = Math.hypot(this.pos.x - RIFT_POS.x, this.pos.z - RIFT_POS.z);
       if (d < RIFT_INTERACT_RADIUS && this.t - this.lastRiftPrompt > 2.5) {
@@ -1333,7 +1768,7 @@ class World3D {
 }
 
 /* =========================================================
-   WORLD 2D — НАВЬ-КРИОЗАЛ + ИСКРА
+   WORLD 2D — НАВЬ-КРИОЗАЛ (славянская стилизация)
    ========================================================= */
 class World2D {
   constructor(game) { this.game = game; this.is3D = false; }
@@ -1354,29 +1789,15 @@ class World2D {
     this.shadow = { x: 0, z: ROOM.minZ + 1, r: 0.7 };
     this.ghost = { angle: 0, radius: 5, cx: 0, cz: -4, x: 0, z: 0 };
 
-    // Искра: видна, если ещё не найдена
     this.iskra = null;
     if (!this.game.state.flags.iskraFound) {
-      this.iskra = {
-        x: ISKRA_2D_POS.x,
-        z: ISKRA_2D_POS.z,
-        r: 0.4,
-        t: 0,
-      };
-      console.log('[iskra] present in Nav at', ISKRA_2D_POS);
-    }
-
-    // Искра материализуется в 3D, если её нашли
-    if (this.game.state.flags.iskraFound && !this.game.state.flags.iskraMaterialized) {
-      // Мы в 2D, но флаг "found" уже true (значит, взял только что). Материализация
-      // произойдёт при возврате в 3D (в World3D.enter). Здесь только лог.
-      console.log('[iskra] will materialize on return to Yav');
+      this.iskra = { x: ISKRA_2D_POS.x, z: ISKRA_2D_POS.z, r: 0.4, t: 0 };
     }
 
     hint(this.iskra
       ? 'Навь · стены призрачны. Найди искру в дальнем углу'
       : 'Навь · искры больше нет. Иди к тени клубка', 5000);
-    console.log('[world2d] entered · навь-криозал');
+    console.log('[world2d] entered · nav slavic');
   }
 
   update(dt) {
@@ -1404,7 +1825,6 @@ class World2D {
       this.ghost.x = this.ghost.cx + Math.cos(this.ghost.angle) * this.ghost.radius;
       this.ghost.z = this.ghost.cz + Math.sin(this.ghost.angle) * this.ghost.radius;
 
-      // искра
       if (this.iskra) {
         this.iskra.t += dt;
         const dIskra = Math.hypot(p.x - this.iskra.x, p.z - this.iskra.z);
@@ -1412,14 +1832,11 @@ class World2D {
           this.iskra = null;
           this.game.state.flags.iskraFound = true;
           hint('Искра в руках. Вернись в Явь через проём', 5000);
-          console.log('[iskra] picked up in Nav');
         }
       }
 
-      // возврат через тень
       const d = Math.hypot(p.x - this.shadow.x, p.z - this.shadow.z);
       if (d < 1.5 && consumeAction('KeyE')) {
-        console.log('[input] E → inflate');
         inflateTo3D(this);
       }
     }
@@ -1432,158 +1849,243 @@ class World2D {
     const sx = x => (x - camX) * scale + w / 2;
     const sy = z => (z - camZ) * scale + h / 2;
 
+    // фон — глубокий чёрный с лёгким синим
     ctx.fillStyle = '#04060c';
     ctx.fillRect(0, 0, w, h);
 
-    const step = scale * 2;
-    ctx.strokeStyle = 'rgba(124,255,216,0.06)';
+    // половицы пола
+    const plankStep = scale * 1.5;
+    ctx.strokeStyle = 'rgba(212,168,67,0.08)';
     ctx.lineWidth = 1;
-    ctx.beginPath();
-    const ox = ((w / 2 - camX * scale) % step + step) % step;
-    const oy = ((h / 2 - camZ * scale) % step + step) % step;
-    for (let x = ox - step; x <= w + step; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
-    for (let y = oy - step; y <= h + step; y += step) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
-    ctx.stroke();
+    for (let y = (camZ * scale) % plankStep; y < h; y += plankStep) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
+    }
 
-    ctx.fillStyle = 'rgba(20,40,80,0.22)';
+    // пол — тёмный прямоугольник
+    ctx.fillStyle = 'rgba(20, 25, 40, 0.55)';
     const fx = sx(ROOM.minX), fy = sy(ROOM.minZ);
     const fw = (ROOM.maxX - ROOM.minX) * scale;
     const fh = (ROOM.maxZ - ROOM.minZ) * scale;
     ctx.fillRect(fx, fy, fw, fh);
 
-    ctx.strokeStyle = '#7cffd8';
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(sx(ROOM.minX), sy(ROOM.minZ));
-    ctx.lineTo(sx(ROOM.minX), sy(ROOM.maxZ));
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(sx(ROOM.maxX), sy(ROOM.minZ));
-    ctx.lineTo(sx(ROOM.maxX), sy(ROOM.maxZ));
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(sx(ROOM.minX), sy(ROOM.minZ));
-    ctx.lineTo(sx(-2), sy(ROOM.minZ));
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(sx(2), sy(ROOM.minZ));
-    ctx.lineTo(sx(ROOM.maxX), sy(ROOM.minZ));
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(sx(ROOM.minX), sy(ROOM.maxZ));
-    ctx.lineTo(sx(ROOM.maxX), sy(ROOM.maxZ));
-    ctx.stroke();
+    // === ЧАСТОКОЛ — стены ===
+    const drawPicket = (x1, z1, x2, z2, color) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
 
-    ctx.strokeStyle = 'rgba(255,204,102,0.35)';
+      const xStart = sx(x1), yStart = sy(z1);
+      const xEnd = sx(x2), yEnd = sy(z2);
+      ctx.beginPath();
+      ctx.moveTo(xStart, yStart);
+      ctx.lineTo(xEnd, yEnd);
+      ctx.stroke();
+
+      // зубцы
+      const segments = Math.floor(Math.hypot(xEnd - xStart, yEnd - yStart) / (scale * 0.8));
+      const dx = (xEnd - xStart) / segments;
+      const dy = (yEnd - yStart) / segments;
+      const toothH = 6;
+      const nx = -(yEnd - yStart) / Math.hypot(xEnd - xStart, yEnd - yStart) * toothH;
+      const ny = (xEnd - xStart) / Math.hypot(xEnd - xStart, yEnd - yStart) * toothH;
+
+      ctx.fillStyle = color;
+      for (let i = 0; i <= segments; i++) {
+        const px = xStart + dx * i;
+        const py = yStart + dy * i;
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        ctx.lineTo(px + nx, py + ny);
+        ctx.lineTo(px + dx, py + dy);
+        ctx.closePath();
+        ctx.fill();
+      }
+    };
+
+    const wallColor = '#c8a860';
+    // левая
+    drawPicket(ROOM.minX, ROOM.minZ, ROOM.minX, ROOM.maxZ, wallColor);
+    // правая
+    drawPicket(ROOM.maxX, ROOM.minZ, ROOM.maxX, ROOM.maxZ, wallColor);
+    // дальняя — с проёмом
+    drawPicket(ROOM.minX, ROOM.minZ, -2, ROOM.minZ, wallColor);
+    drawPicket(2, ROOM.minZ, ROOM.maxX, ROOM.minZ, wallColor);
+    // ближняя
+    drawPicket(ROOM.minX, ROOM.maxZ, ROOM.maxX, ROOM.maxZ, wallColor);
+
+    // проём — свечение
+    ctx.strokeStyle = 'rgba(255,204,102,0.5)';
     ctx.lineWidth = 6;
     ctx.beginPath();
     ctx.moveTo(sx(-2), sy(ROOM.minZ));
     ctx.lineTo(sx(2), sy(ROOM.minZ));
     ctx.stroke();
 
-    // капсулы
-    ctx.strokeStyle = 'rgba(120,180,255,0.55)';
-    ctx.lineWidth = 2;
+    // капсулы — стилизованные сварги
     for (let i = 0; i < CAPSULE_Z.length; i++) {
       const cxp = sx(CAPSULES_X + 0.5);
       const cyp = sy(CAPSULE_Z[i]);
+
+      ctx.strokeStyle = i === 1 ? 'rgba(192,32,48,0.7)' : 'rgba(212,168,67,0.6)';
+      ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(cxp, cyp, 0.85 * scale, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.fillStyle = i === 1 ? 'rgba(255,80,100,0.18)' : 'rgba(80,140,220,0.18)';
-      ctx.fill();
+
+      // сварга внутри
+      ctx.strokeStyle = i === 1 ? 'rgba(255,80,100,0.8)' : 'rgba(212,168,67,0.8)';
+      ctx.lineWidth = 1.5;
+      for (let k = 0; k < 4; k++) {
+        const a = k * Math.PI / 2 + this.t * 0.2;
+        ctx.beginPath();
+        ctx.moveTo(cxp, cyp);
+        ctx.lineTo(cxp + Math.cos(a) * 0.5 * scale, cyp + Math.sin(a) * 0.5 * scale);
+        ctx.stroke();
+      }
     }
 
-    // пульт
-    ctx.fillStyle = 'rgba(255,180,80,0.18)';
-    ctx.strokeStyle = 'rgba(255,180,80,0.55)';
+    // печь-пульт — прямоугольник с орнаментом
+    const pxp = sx(PULT_POS.x - 1.2), pyp = sy(PULT_POS.z - 0.7);
+    ctx.fillStyle = 'rgba(60, 30, 10, 0.6)';
+    ctx.fillRect(pxp, pyp, 2.4 * scale, 1.4 * scale);
+    ctx.strokeStyle = 'rgba(212,168,67,0.7)';
     ctx.lineWidth = 2;
-    const pxp = sx(PULT_POS.x - 1.1), pyp = sy(PULT_POS.z - 0.5);
-    ctx.fillRect(pxp, pyp, 2.2 * scale, 1.0 * scale);
-    ctx.strokeRect(pxp, pyp, 2.2 * scale, 1.0 * scale);
+    ctx.strokeRect(pxp, pyp, 2.4 * scale, 1.4 * scale);
+    // ромбы на пульте
+    ctx.fillStyle = 'rgba(192,32,48,0.7)';
+    for (let k = 0; k < 3; k++) {
+      const dxx = pxp + (k + 1) * (2.4 * scale / 4);
+      drawDiamond(ctx, dxx, pyp + 0.7 * scale, 6, 'rgba(192,32,48,0.8)');
+    }
 
-    // разлом
-    ctx.strokeStyle = 'rgba(80,150,255,0.5)';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 6]);
+    // РАЗЛОМ — огненное кольцо с рунами
+    const rx = sx(RIFT_POS.x), ry = sy(RIFT_POS.z);
+    const riftPulse = 0.6 + Math.sin(this.t * 3) * 0.25;
+    // аура
+    const rg = ctx.createRadialGradient(rx, ry, 0, rx, ry, 2.2 * scale);
+    rg.addColorStop(0, `rgba(255,136,68,${riftPulse * 0.5})`);
+    rg.addColorStop(0.5, `rgba(255,136,68,${riftPulse * 0.2})`);
+    rg.addColorStop(1, 'rgba(255,136,68,0)');
+    ctx.fillStyle = rg;
+    ctx.beginPath(); ctx.arc(rx, ry, 2.2 * scale, 0, Math.PI * 2); ctx.fill();
+    // кольцо
+    ctx.strokeStyle = `rgba(255,170,80,${0.7 + riftPulse * 0.3})`;
+    ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.arc(sx(RIFT_POS.x), sy(RIFT_POS.z), 1.2 * scale, 0, Math.PI * 2);
+    ctx.arc(rx, ry, 1.2 * scale, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.setLineDash([]);
+    // руны вокруг
+    ctx.fillStyle = 'rgba(255,220,140,0.85)';
+    ctx.font = `${Math.floor(scale * 0.45)}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const runes2d = ['ᚱ', 'ᚨ', 'ᛞ', 'ᛊ', 'ᛉ', 'ᛏ', 'ᛒ', 'ᚦ'];
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 + this.t * 0.3;
+      const rx2 = rx + Math.cos(a) * 1.55 * scale;
+      const ry2 = ry + Math.sin(a) * 1.55 * scale;
+      ctx.fillText(runes2d[i], rx2, ry2);
+    }
 
-    // призрак
+    // ПРИЗРАК — душа в саване
     const gx = sx(this.ghost.x), gy = sy(this.ghost.z);
     const ghostAlpha = 0.35 + Math.sin(this.t * 2.2) * 0.15;
+    // ореол
     const gg = ctx.createRadialGradient(gx, gy, 0, gx, gy, 1.4 * scale);
-    gg.addColorStop(0, `rgba(180,220,255,${ghostAlpha})`);
-    gg.addColorStop(1, 'rgba(180,220,255,0)');
+    gg.addColorStop(0, `rgba(200,220,255,${ghostAlpha})`);
+    gg.addColorStop(1, 'rgba(200,220,255,0)');
     ctx.fillStyle = gg;
     ctx.beginPath(); ctx.arc(gx, gy, 1.4 * scale, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = `rgba(220,240,255,${ghostAlpha + 0.15})`;
-    ctx.beginPath(); ctx.arc(gx, gy, 0.5 * scale, 0, Math.PI * 2); ctx.fill();
+    // фигура в саване (треугольник)
+    ctx.fillStyle = `rgba(220,240,255,${ghostAlpha + 0.2})`;
+    ctx.beginPath();
+    ctx.moveTo(gx, gy - 0.6 * scale);
+    ctx.lineTo(gx + 0.4 * scale, gy + 0.4 * scale);
+    ctx.lineTo(gx - 0.4 * scale, gy + 0.4 * scale);
+    ctx.closePath();
+    ctx.fill();
+    // голова
+    ctx.beginPath();
+    ctx.arc(gx, gy - 0.35 * scale, 0.18 * scale, 0, Math.PI * 2);
+    ctx.fill();
 
-    // ИСКРА
+    // ИСКРА — звезда-оберег
     if (this.iskra) {
       const ix = sx(this.iskra.x), iy = sy(this.iskra.z);
       const iskraPulse = 0.7 + Math.sin(this.t * 4) * 0.3;
       const radius = 1.6 * scale * iskraPulse;
 
+      // аура
       const ig = ctx.createRadialGradient(ix, iy, 0, ix, iy, radius);
       ig.addColorStop(0, `rgba(255,255,255,${0.95})`);
-      ig.addColorStop(0.25, `rgba(180,220,255,${0.7 * iskraPulse})`);
-      ig.addColorStop(1, 'rgba(100,180,255,0)');
+      ig.addColorStop(0.25, `rgba(255,220,140,${0.7 * iskraPulse})`);
+      ig.addColorStop(1, 'rgba(255,180,80,0)');
       ctx.fillStyle = ig;
       ctx.beginPath(); ctx.arc(ix, iy, radius, 0, Math.PI * 2); ctx.fill();
 
-      // ядро
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath(); ctx.arc(ix, iy, 0.35 * scale, 0, Math.PI * 2); ctx.fill();
-
-      // лучи
-      ctx.strokeStyle = `rgba(255,255,255,${0.5 * iskraPulse})`;
-      ctx.lineWidth = 1.5;
-      for (let k = 0; k < 4; k++) {
-        const a = this.t * 0.5 + k * Math.PI / 2;
-        const r1 = 0.6 * scale;
-        const r2 = 1.4 * scale * iskraPulse;
-        ctx.beginPath();
+      // сварга-оберег — 8 лучей
+      ctx.strokeStyle = `rgba(255,240,200,${0.9 * iskraPulse})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let k = 0; k < 8; k++) {
+        const a = k * Math.PI / 4 + this.t * 0.8;
+        const r1 = 0.35 * scale;
+        const r2 = 0.9 * scale * iskraPulse;
         ctx.moveTo(ix + Math.cos(a) * r1, iy + Math.sin(a) * r1);
         ctx.lineTo(ix + Math.cos(a) * r2, iy + Math.sin(a) * r2);
-        ctx.stroke();
       }
+      ctx.stroke();
+
+      // ядро
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(ix, iy, 0.22 * scale, 0, Math.PI * 2); ctx.fill();
 
       // подсказка
       const dIskra = Math.hypot(this.player.x - this.iskra.x, this.player.z - this.iskra.z);
       if (dIskra < 1.5) {
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '16px monospace';
+        ctx.fillStyle = '#ffdd66';
+        ctx.font = 'bold 15px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(input.touchMode ? 'E — взять искру' : 'E — взять искру', w / 2, 66);
+        ctx.fillText('E — взять искру', w / 2, 66);
       }
     }
 
-    // тень клубка
+    // ТЕНЬ КЛУБКА — пульсирующий клубок с обмоткой
     const shx = sx(this.shadow.x), shy = sy(this.shadow.z);
     const pulse = 0.55 + Math.sin(this.t * 3) * 0.3;
+    // аура
     const gr = ctx.createRadialGradient(shx, shy, 0, shx, shy, this.shadow.r * scale * 2.5);
     gr.addColorStop(0, `rgba(255,204,102,${pulse})`);
     gr.addColorStop(1, 'rgba(255,204,102,0)');
     ctx.fillStyle = gr;
     ctx.beginPath(); ctx.arc(shx, shy, this.shadow.r * scale * 2.5, 0, Math.PI * 2); ctx.fill();
+    // сам клубок
     ctx.fillStyle = `rgba(255,220,140,${0.75 + pulse * 0.25})`;
     ctx.beginPath(); ctx.arc(shx, shy, this.shadow.r * scale, 0, Math.PI * 2); ctx.fill();
+    // обмотка
+    ctx.strokeStyle = `rgba(120,80,20,${0.6 + pulse * 0.2})`;
+    ctx.lineWidth = 1;
+    for (let k = 0; k < 3; k++) {
+      ctx.beginPath();
+      ctx.ellipse(shx, shy, this.shadow.r * scale * 0.9, this.shadow.r * scale * 0.5, k * Math.PI / 3 + this.t * 0.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
-    // игрок
+    // ИГРОК — дух-свеча
     const px = sx(this.player.x), py = sy(this.player.z);
+    // аура
     const pg = ctx.createRadialGradient(px, py, 0, px, py, this.player.r * scale * 2.5);
-    pg.addColorStop(0, 'rgba(124,255,216,0.75)');
+    pg.addColorStop(0, 'rgba(124,255,216,0.7)');
     pg.addColorStop(1, 'rgba(124,255,216,0)');
     ctx.fillStyle = pg;
     ctx.beginPath(); ctx.arc(px, py, this.player.r * scale * 2.5, 0, Math.PI * 2); ctx.fill();
+    // тело
     ctx.fillStyle = '#7cffd8';
     ctx.beginPath(); ctx.arc(px, py, this.player.r * scale, 0, Math.PI * 2); ctx.fill();
-
+    // направление
     ctx.strokeStyle = '#0a2a24';
     ctx.lineWidth = 3;
     ctx.beginPath();
@@ -1591,13 +2093,23 @@ class World2D {
     ctx.lineTo(px + Math.cos(this.player.dir) * this.player.r * scale * 1.6,
                py + Math.sin(this.player.dir) * this.player.r * scale * 1.6);
     ctx.stroke();
+    // свеча над головой
+    const candleFlame = 0.5 + Math.sin(this.t * 8) * 0.2;
+    const flameGrad = ctx.createRadialGradient(px, py - this.player.r * scale * 1.8, 0, px, py - this.player.r * scale * 1.8, 0.4 * scale * candleFlame);
+    flameGrad.addColorStop(0, 'rgba(255,240,180,0.95)');
+    flameGrad.addColorStop(1, 'rgba(255,180,60,0)');
+    ctx.fillStyle = flameGrad;
+    ctx.beginPath();
+    ctx.arc(px, py - this.player.r * scale * 1.8, 0.4 * scale * candleFlame, 0, Math.PI * 2);
+    ctx.fill();
 
+    // подсказка у тени
     const nearShadow = Math.hypot(this.player.x - this.shadow.x, this.player.z - this.shadow.z) < 1.5;
     if (nearShadow) {
-      ctx.fillStyle = '#7cffd8';
-      ctx.font = '16px monospace';
+      ctx.fillStyle = '#ffdd66';
+      ctx.font = 'bold 15px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(input.touchMode ? 'E — вернуться' : 'E — вернуться в Явь', w / 2, 40);
+      ctx.fillText('E — вернуться в Явь', w / 2, 40);
     }
   }
 
@@ -1606,17 +2118,14 @@ class World2D {
 }
 
 /* =========================================================
-   ISKRA MATERIALIZATION ON RETURN
+   ISKRA MATERIALIZATION
    ========================================================= */
-// Эта функция вызывается из World3D.enter через проверку flag —
-// но мы дублируем событие здесь, чтобы показать hint один раз.
 function checkIskraMaterialization() {
   const flags = game.state.flags;
   if (flags.iskraFound && !flags.iskraMaterialized) {
     flags.iskraMaterialized = true;
     hint('Искра обрела форму в Яви. Поговори с домовым', 5000);
     refreshHUD();
-    console.log('[iskra] materialized in Yav');
   }
 }
 
@@ -1629,7 +2138,6 @@ function frame(now) {
   last = now;
   game.time += dt;
 
-  // диалог — глобальная обработка E
   if (dialogue.active && consumeAction('KeyE')) {
     advanceDialogue();
   }
@@ -1637,7 +2145,6 @@ function frame(now) {
   const s = game.scene;
   if (s) {
     if (!game.transitioning) {
-      // Проверяем материализацию искры: если вернулись в 3D с флагом iskraFound
       if (s.is3D) checkIskraMaterialization();
       s.update?.(dt);
     }
@@ -1657,4 +2164,4 @@ requestAnimationFrame(() => {
   overlay.style.opacity = '0';
 });
 
-console.log('[iskra] booted, v5');
+console.log('[iskra] booted, v6 · slavic');
