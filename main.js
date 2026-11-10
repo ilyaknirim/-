@@ -23,16 +23,20 @@ function angleLerp(a, b, t) {
    INPUT
    --------------------------------------------------------- */
 const keys = Object.create(null);
-const look = { dx: 0, dy: 0 };     // накопитель поворота камеры (мышь + тач)
-const input = {
-  moveX: 0,                        // -1..1  (джойстик, вправо +)
-  moveY: 0,                        // -1..1  (джойстик, вперёд +)
-  joyActive: false,
-  touchMode: false,
-};
+const look = { dx: 0, dy: 0 };
+const input = { moveX: 0, moveY: 0, joyActive: false, touchMode: false };
+
+/* ---------- action buffer (one-shot, fixes fast taps) ---------- */
+const actionBuf = Object.create(null);
+function pressAction(code) { actionBuf[code] = (actionBuf[code] || 0) + 1; }
+function consumeAction(code) {
+  if (actionBuf[code] > 0) { actionBuf[code]--; return true; }
+  return false;
+}
 
 /* ---------- keyboard ---------- */
 addEventListener('keydown', e => {
+  if (!keys[e.code]) pressAction(e.code);
   keys[e.code] = true;
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','KeyE','KeyF'].includes(e.code)) e.preventDefault();
 });
@@ -71,25 +75,25 @@ D3.addEventListener('pointermove', e => {
   lookLastX = e.clientX;
   lookLastY = e.clientY;
 });
-D3.addEventListener('pointerup', e => {
-  if (e.pointerId === lookPointerId) lookPointerId = null;
-});
-D3.addEventListener('pointercancel', e => {
-  if (e.pointerId === lookPointerId) lookPointerId = null;
-});
+D3.addEventListener('pointerup', e => { if (e.pointerId === lookPointerId) lookPointerId = null; });
+D3.addEventListener('pointercancel', e => { if (e.pointerId === lookPointerId) lookPointerId = null; });
 
 /* =========================================================
    TOUCH UI
    ========================================================= */
-const isTouchDevice =
-  'ontouchstart' in window ||
-  navigator.maxTouchPoints > 0 ||
-  matchMedia('(any-pointer: coarse)').matches;
-
-function setupTouchUI() {
+function detectTouch() {
   const url = new URL(location.href);
   const force = url.searchParams.get('touch');
-  const show = force === '1' ? true : force === '0' ? false : isTouchDevice;
+  if (force === '1') return true;
+  if (force === '0') return false;
+  return ('ontouchstart' in window) ||
+         (navigator.maxTouchPoints > 0) ||
+         matchMedia('(any-pointer: coarse)').matches;
+}
+
+function setupTouchUI() {
+  if (!mobileUI) { console.warn('[touch] #mobile-ui not found'); return; }
+  const show = detectTouch();
   input.touchMode = show;
   mobileUI.classList.toggle('visible', show);
   console.log('[touch] enabled =', show);
@@ -102,48 +106,53 @@ const JOY_RADIUS = 38;
 let joyPointerId = null;
 let joyCenterX = 0, joyCenterY = 0;
 
-joyBase.addEventListener('pointerdown', e => {
-  e.preventDefault();
-  e.stopPropagation();
-  if (joyPointerId !== null) return;
-  joyPointerId = e.pointerId;
-  try { joyBase.setPointerCapture(e.pointerId); } catch {}
-  const rect = joyBase.getBoundingClientRect();
-  joyCenterX = rect.left + rect.width / 2;
-  joyCenterY = rect.top + rect.height / 2;
-  input.joyActive = true;
-  updateJoystick(e.clientX, e.clientY);
-});
-joyBase.addEventListener('pointermove', e => {
-  if (e.pointerId !== joyPointerId) return;
-  e.preventDefault();
-  updateJoystick(e.clientX, e.clientY);
-});
-function endJoystick(e) {
-  if (e.pointerId !== joyPointerId) return;
-  joyPointerId = null;
-  input.joyActive = false;
-  input.moveX = 0;
-  input.moveY = 0;
-  joyThumb.style.transform = 'translate(-50%, -50%)';
-}
-joyBase.addEventListener('pointerup', endJoystick);
-joyBase.addEventListener('pointercancel', endJoystick);
+if (joyBase && joyThumb) {
+  joyBase.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (joyPointerId !== null) return;
+    joyPointerId = e.pointerId;
+    try { joyBase.setPointerCapture(e.pointerId); } catch {}
+    const rect = joyBase.getBoundingClientRect();
+    joyCenterX = rect.left + rect.width / 2;
+    joyCenterY = rect.top + rect.height / 2;
+    input.joyActive = true;
+    updateJoystick(e.clientX, e.clientY);
+    console.log('[joy] down', e.pointerType, 'id', e.pointerId);
+  });
+  joyBase.addEventListener('pointermove', e => {
+    if (e.pointerId !== joyPointerId) return;
+    e.preventDefault();
+    updateJoystick(e.clientX, e.clientY);
+  });
+  const endJoy = e => {
+    if (e.pointerId !== joyPointerId) return;
+    joyPointerId = null;
+    input.joyActive = false;
+    input.moveX = 0;
+    input.moveY = 0;
+    joyThumb.style.transform = 'translate(-50%, -50%)';
+    console.log('[joy] up');
+  };
+  joyBase.addEventListener('pointerup', endJoy);
+  joyBase.addEventListener('pointercancel', endJoy);
 
-function updateJoystick(x, y) {
-  let dx = x - joyCenterX;
-  let dy = y - joyCenterY;
-  const dist = Math.hypot(dx, dy);
-  const clamped = Math.min(dist, JOY_RADIUS);
-  const angle = Math.atan2(dy, dx);
-  const fx = Math.cos(angle) * clamped;
-  const fy = Math.sin(angle) * clamped;
-  joyThumb.style.transform = `translate(calc(-50% + ${fx}px), calc(-50% + ${fy}px))`;
-
-  const deadZone = 5;
-  const effective = Math.max(0, clamped - deadZone) / (JOY_RADIUS - deadZone);
-  input.moveX = Math.cos(angle) * effective;
-  input.moveY = -Math.sin(angle) * effective;  // вверх = вперёд
+  function updateJoystick(x, y) {
+    let dx = x - joyCenterX;
+    let dy = y - joyCenterY;
+    const dist = Math.hypot(dx, dy);
+    const clamped = Math.min(dist, JOY_RADIUS);
+    const angle = Math.atan2(dy, dx);
+    const fx = Math.cos(angle) * clamped;
+    const fy = Math.sin(angle) * clamped;
+    joyThumb.style.transform = `translate(calc(-50% + ${fx}px), calc(-50% + ${fy}px))`;
+    const deadZone = 5;
+    const effective = Math.max(0, clamped - deadZone) / (JOY_RADIUS - deadZone);
+    input.moveX = Math.cos(angle) * effective;
+    input.moveY = -Math.sin(angle) * effective;
+  }
+} else {
+  console.warn('[touch] joystick elements not found');
 }
 
 /* ---------- action buttons ---------- */
@@ -155,8 +164,10 @@ document.querySelectorAll('.action-btn').forEach(btn => {
     e.preventDefault();
     e.stopPropagation();
     try { btn.setPointerCapture(e.pointerId); } catch {}
+    pressAction(key);         // ← one-shot buffer
     keys[key] = true;
     btn.classList.add('active');
+    console.log('[btn] down', key, e.pointerType);
   });
   const release = () => {
     keys[key] = false;
@@ -178,31 +189,23 @@ const game = {
   scene: null,
   time: 0,
   transitioning: false,
-  state: {
-    last3DPos: { x: 0, z: 8 },
-    hasKlubok: false,
-  },
+  state: { last3DPos: { x: 0, z: 8 }, hasKlubok: false },
 };
 
-/* ---------- resize ---------- */
 function resize() {
   const w = innerWidth, h = innerHeight;
   game.w = w; game.h = h;
   const dpr = Math.min(devicePixelRatio, 2);
-
   D2.width = Math.floor(w * dpr);
   D2.height = Math.floor(h * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
   renderer3D.setPixelRatio(dpr);
   renderer3D.setSize(w, h, false);
-
   if (game.scene?.resize) game.scene.resize(w, h);
 }
 addEventListener('resize', resize);
 addEventListener('orientationchange', () => setTimeout(resize, 100));
 
-/* ---------- hint ---------- */
 let hintTimer = null;
 function hint(text, ms = 3000) {
   hintEl.textContent = text;
@@ -212,7 +215,6 @@ function hint(text, ms = 3000) {
   console.log('[hint]', text);
 }
 
-/* ---------- canvas mode ---------- */
 function setCanvasMode(is3D) {
   D2.style.opacity = is3D ? '0' : '1';
   D3.style.opacity = is3D ? '1' : '0';
@@ -263,23 +265,15 @@ async function collapseTo2D(world3d) {
     function step() {
       const t = Math.min(1, (performance.now() - t0) / dur);
       const e = t * t;
-
       cam.position.lerpVectors(startPos, endPos, e);
       cam.fov = startFov + (endFov - startFov) * e;
       cam.updateProjectionMatrix();
-
       const lookT = new THREE.Vector3().lerpVectors(startLookTarget, endLookTarget, e);
       cam.lookAt(lookT);
-
-      if (scene3.fog) {
-        scene3.fog.density = startFogDensity + (endFogDensity - startFogDensity) * e;
-      }
+      if (scene3.fog) scene3.fog.density = startFogDensity + (endFogDensity - startFogDensity) * e;
       scene3.scale.y = startScaleY + (endScaleY - startScaleY) * e;
-
       overlay.style.opacity = String(Math.pow(e, 2.5));
-
-      if (t < 1) requestAnimationFrame(step);
-      else resolve();
+      if (t < 1) requestAnimationFrame(step); else resolve();
     }
     requestAnimationFrame(step);
   });
@@ -355,19 +349,13 @@ async function inflateTo3D(world2d) {
     function step() {
       const t = Math.min(1, (performance.now() - t0) / dur);
       const e = 1 - Math.pow(1 - t, 2);
-
       cam.position.lerpVectors(startPos, endPos, e);
       cam.fov = startFov + (endFov - startFov) * e;
       cam.updateProjectionMatrix();
       cam.lookAt(p.x, 1.7, p.z);
-
-      if (world3d.scene3.fog) {
-        world3d.scene3.fog.density = startFogDensity + (endFogDensity - startFogDensity) * e;
-      }
+      if (world3d.scene3.fog) world3d.scene3.fog.density = startFogDensity + (endFogDensity - startFogDensity) * e;
       world3d.scene3.scale.y = startScaleY + (endScaleY - startScaleY) * e;
-
-      if (t < 1) requestAnimationFrame(step);
-      else resolve();
+      if (t < 1) requestAnimationFrame(step); else resolve();
     }
     requestAnimationFrame(step);
   });
@@ -385,6 +373,7 @@ class World3D {
 
   enter() {
     look.dx = 0; look.dy = 0;
+    actionBuf.KeyE = 0; actionBuf.KeyF = 0;   // сброс буфера
 
     const g = this.game;
     const scene = new THREE.Scene();
@@ -415,14 +404,10 @@ class World3D {
       const z = (rnd() - 0.5) * 80;
       if (Math.hypot(x, z) < 15) continue;
       if (Math.abs(x) < 4 && z < 0 && z > -18) continue;
-      const m = new THREE.Mesh(
-        boxGeo,
-        new THREE.MeshStandardMaterial({
-          color: new THREE.Color().setHSL(0.58 + rnd() * 0.1, 0.55, 0.12 + rnd() * 0.1),
-          emissive: 0x0a1a33,
-          roughness: 0.9,
-        })
-      );
+      const m = new THREE.Mesh(boxGeo, new THREE.MeshStandardMaterial({
+        color: new THREE.Color().setHSL(0.58 + rnd() * 0.1, 0.55, 0.12 + rnd() * 0.1),
+        emissive: 0x0a1a33, roughness: 0.9,
+      }));
       m.scale.set(1 + rnd() * 2.5, hgt, 1 + rnd() * 2.5);
       m.position.set(x, hgt / 2, z);
       scene.add(m);
@@ -482,14 +467,13 @@ class World3D {
     this.klubokAnim = null;
 
     hint('Найди клубок рядом (жёлтый шар). Двигайся и крути камеру', 5000);
-    console.log('[world3d] entered, klubok on ground at', this.klubokMesh.position.toArray());
+    console.log('[world3d] entered');
   }
 
   updateThreadPosition() {
     const a = new THREE.Vector3(this.pos.x, 1.3, this.pos.z);
     const b = this.klubokMesh.position.clone();
-    const dist = a.distanceTo(b);
-    if (dist < 0.3) { this.thread.visible = false; return; }
+    if (a.distanceTo(b) < 0.3) { this.thread.visible = false; return; }
     this.thread.visible = true;
     const mid = a.clone().add(b).multiplyScalar(0.5);
     this.thread.position.copy(mid);
@@ -505,29 +489,21 @@ class World3D {
     forward.y = 0;
     if (forward.lengthSq() < 0.01) return;
     forward.normalize();
-
     const start = new THREE.Vector3(this.pos.x, 1.3, this.pos.z);
-    const target = new THREE.Vector3(
-      this.pos.x + forward.x * 15,
-      0.35,
-      this.pos.z + forward.z * 15
-    );
-
+    const target = new THREE.Vector3(this.pos.x + forward.x * 15, 0.35, this.pos.z + forward.z * 15);
     this.klubokState = 'thrown';
     this.klubokAnim = { start: start.clone(), target, startTime: performance.now(), duration: 750 };
-    console.log('[klubok] thrown', start.toArray(), '→', target.toArray());
+    console.log('[klubok] thrown');
   }
 
   update(dt) {
     this.t += dt;
     const g = this.game;
 
-    /* камера: mouse + touch */
     this.yaw -= look.dx * 0.004;
     this.pitch = clamp(this.pitch + look.dy * 0.003, -0.15, 1.15);
     look.dx = 0; look.dy = 0;
 
-    /* движение */
     if (!g.transitioning) {
       const { f, r } = getMoveInput();
       const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
@@ -535,22 +511,15 @@ class World3D {
       const move = new THREE.Vector3().addScaledVector(forward, f).addScaledVector(right, r);
       const moving = move.lengthSq() > 0.0001;
       if (moving) move.normalize();
-
       this.pos.addScaledVector(move, 8 * dt);
       this.pos.x = clamp(this.pos.x, -44, 44);
       this.pos.z = clamp(this.pos.z, -44, 44);
-
       this.player.position.set(this.pos.x, Math.sin(this.t * 9) * 0.05 * (moving ? 1 : 0), this.pos.z);
       if (moving) {
-        this.player.rotation.y = angleLerp(
-          this.player.rotation.y,
-          Math.atan2(move.x, move.z),
-          Math.min(1, dt * 12)
-        );
+        this.player.rotation.y = angleLerp(this.player.rotation.y, Math.atan2(move.x, move.z), Math.min(1, dt * 12));
       }
     }
 
-    /* follow-cam */
     const dist = 9;
     const off = new THREE.Vector3(
       Math.sin(this.yaw) * Math.cos(this.pitch),
@@ -561,7 +530,6 @@ class World3D {
     this.camera.position.lerp(camTarget, 1 - Math.pow(0.0005, dt));
     this.camera.lookAt(this.pos.x, 1.7, this.pos.z);
 
-    /* klubok state machine */
     if (this.klubokState === 'ground') {
       const d = Math.hypot(this.klubokMesh.position.x - this.pos.x, this.klubokMesh.position.z - this.pos.z);
       if (d < 2) {
@@ -573,10 +541,7 @@ class World3D {
     else if (this.klubokState === 'carried') {
       this.klubokMesh.position.set(this.pos.x + 0.8, 1.2, this.pos.z + 0.4);
       this.updateThreadPosition();
-      if (keys.KeyF && !g.transitioning) {
-        keys.KeyF = false;
-        this.throwKlubok();
-      }
+      if (consumeAction('KeyF') && !g.transitioning) this.throwKlubok();
     }
     else if (this.klubokState === 'thrown' && this.klubokAnim) {
       const a = this.klubokAnim;
@@ -587,11 +552,7 @@ class World3D {
       const y = a.start.y + (a.target.y - a.start.y) * e + Math.sin(t * Math.PI) * 2.5;
       this.klubokMesh.position.set(x, y, z);
       this.updateThreadPosition();
-      if (t >= 1) {
-        this.klubokState = 'landed';
-        this.klubokAnim = null;
-        this.checkKlubokLanding();
-      }
+      if (t >= 1) { this.klubokState = 'landed'; this.klubokAnim = null; this.checkKlubokLanding(); }
     }
     else if (this.klubokState === 'landed') {
       this.updateThreadPosition();
@@ -601,14 +562,12 @@ class World3D {
         hint('Клубок снова у тебя. Брось вперёд (F)', 2500);
         console.log('[klubok] re-picked');
       }
-      if (keys.KeyF && !g.transitioning) {
-        keys.KeyF = false;
+      if (consumeAction('KeyF') && !g.transitioning) {
         this.klubokState = 'carried';
         this.throwKlubok();
       }
     }
 
-    /* rift react to klubok */
     const klubokNearRift = Math.hypot(
       this.klubokMesh.position.x - this.rift.position.x,
       this.klubokMesh.position.z - this.rift.position.z
@@ -623,15 +582,13 @@ class World3D {
     this.rift.rotation.z = this.t * 0.8;
     this.riftBeam.material.opacity = klubokNearRift ? 0.35 : 0.14;
 
-    /* interact */
-    if (keys.KeyE && !g.transitioning) {
+    if (!g.transitioning && consumeAction('KeyE')) {
       const playerNearKlubok = Math.hypot(
         this.klubokMesh.position.x - this.pos.x,
         this.klubokMesh.position.z - this.pos.z
       ) < 3;
       if (klubokNearRift && playerNearKlubok) {
-        keys.KeyE = false;
-        console.log('[input] E pressed, triggering collapse');
+        console.log('[input] E → collapse');
         collapseTo2D(this);
       }
     }
@@ -642,7 +599,7 @@ class World3D {
       this.klubokMesh.position.x - this.rift.position.x,
       this.klubokMesh.position.z - this.rift.position.z
     );
-    console.log('[klubok] landed, dist to rift:', d.toFixed(2));
+    console.log('[klubok] landed, dist:', d.toFixed(2));
     if (d < 4) {
       hint('Разлом активирован! Подойди к клубку и нажми E', 5000);
       console.log('[rift] activated');
@@ -652,13 +609,11 @@ class World3D {
   }
 
   render() { this.game.renderer3D.render(this.scene3, this.camera); }
-
   resize(w, h) {
     if (!this.camera) return;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
-
   exit() {
     this.scene3?.traverse(o => {
       o.geometry?.dispose?.();
@@ -676,17 +631,17 @@ class World2D {
 
   enter() {
     look.dx = 0; look.dy = 0;
+    actionBuf.KeyE = 0; actionBuf.KeyF = 0;
 
     const pos = this.game.state.last3DPos || { x: 0, z: 8 };
     this.player = { x: pos.x, z: pos.z, r: 0.6, speed: 7, dir: 0 };
     this.cam = { x: this.player.x, z: this.player.z };
     this.t = 0;
-
     this.shadow = { x: this.player.x + 3, z: this.player.z - 3, r: 0.7 };
     this.returnRift = { x: 0, z: -10, r: 1.5 };
 
     hint('Ты в Нави. Иди к тени клубка (жёлтая точка). E — вернуться в Явь', 5000);
-    console.log('[world2d] entered, spawn', pos, 'shadow', this.shadow);
+    console.log('[world2d] entered');
   }
 
   update(dt) {
@@ -706,9 +661,8 @@ class World2D {
       this.cam.z += (p.z - this.cam.z) * k;
 
       const d = Math.hypot(p.x - this.shadow.x, p.z - this.shadow.z);
-      if (d < 1.5 && keys.KeyE) {
-        keys.KeyE = false;
-        console.log('[input] E pressed, triggering inflate');
+      if (d < 1.5 && consumeAction('KeyE')) {
+        console.log('[input] E → inflate');
         inflateTo3D(this);
       }
     }
@@ -789,7 +743,6 @@ function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.05);
   last = now;
   game.time += dt;
-
   const s = game.scene;
   if (s) {
     if (!game.transitioning) s.update?.(dt);
@@ -808,3 +761,5 @@ requestAnimationFrame(() => {
   overlay.style.transition = 'opacity 0.6s ease';
   overlay.style.opacity = '0';
 });
+
+console.log('[iskra] booted, v2');
