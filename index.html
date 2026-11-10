@@ -81,6 +81,67 @@
   }
   @media (min-width: 768px) { #hud { font-size: 13px; max-width: none; } }
 
+  /* ---- Dialogue ---- */
+  #dialogue {
+    position: fixed;
+    left: 50%;
+    bottom: 230px;
+    transform: translateX(-50%);
+    width: min(640px, 88vw);
+    z-index: 15;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .25s ease, transform .25s ease;
+  }
+  #dialogue.dialogue-hidden {
+    opacity: 0;
+    transform: translate(-50%, 10px);
+  }
+  #dialogue:not(.dialogue-hidden) {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  .dialogue-box {
+    background: rgba(4, 10, 22, 0.94);
+    border: 2px solid rgba(79, 240, 255, 0.55);
+    border-radius: 14px;
+    padding: 16px 22px;
+    box-shadow: 0 0 40px rgba(79, 240, 255, 0.25), inset 0 0 20px rgba(79, 240, 255, 0.08);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  .dialogue-speaker {
+    color: #4ff0ff;
+    font-family: ui-monospace, monospace;
+    font-size: 13px;
+    letter-spacing: 0.14em;
+    margin-bottom: 10px;
+    font-weight: bold;
+    text-shadow: 0 0 12px rgba(79, 240, 255, 0.7);
+  }
+  .dialogue-text {
+    color: #e8f0ff;
+    font-size: 16px;
+    line-height: 1.5;
+    min-height: 54px;
+    text-shadow: 0 0 8px rgba(120, 200, 255, 0.3);
+  }
+  .dialogue-hint {
+    color: rgba(124, 255, 216, 0.65);
+    font-size: 11px;
+    font-family: ui-monospace, monospace;
+    margin-top: 10px;
+    text-align: right;
+    letter-spacing: 0.08em;
+  }
+  @media (max-width: 600px) {
+    #dialogue { bottom: 200px; }
+    .dialogue-box { padding: 12px 16px; }
+    .dialogue-text { font-size: 14px; min-height: 46px; }
+    .dialogue-speaker { font-size: 12px; }
+  }
+
+  /* ---- Mobile UI ---- */
   #mobile-ui {
     position: fixed;
     inset: 0;
@@ -182,6 +243,14 @@
 <div id="hud"></div>
 <div id="overlay"></div>
 
+<div id="dialogue" class="dialogue-hidden">
+  <div class="dialogue-box">
+    <div class="dialogue-speaker">—</div>
+    <div class="dialogue-text"></div>
+    <div class="dialogue-hint">E — далее</div>
+  </div>
+</div>
+
 <div id="mobile-ui">
   <div id="joystick-container">
     <div id="joystick-base">
@@ -194,6 +263,6 @@
   </div>
 </div>
 
-<script type="module" src="./main.js?v=4"></script>
+<script type="module" src="./main.js?v=5"></script>
 </body>
 </html>

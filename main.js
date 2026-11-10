@@ -10,6 +10,9 @@ const overlay = document.getElementById('overlay');
 const hintEl = document.getElementById('hint');
 const hudEl = document.getElementById('hud');
 const mobileUI = document.getElementById('mobile-ui');
+const dialogueEl = document.getElementById('dialogue');
+const dialogueSpeakerEl = dialogueEl.querySelector('.dialogue-speaker');
+const dialogueTextEl = dialogueEl.querySelector('.dialogue-text');
 
 const renderer3D = new THREE.WebGLRenderer({ canvas: D3, antialias: true });
 
@@ -32,6 +35,51 @@ const PLAYER_START = new THREE.Vector3(0, 0, 8);
 const CAPSULES_X = -10.5;
 const CAPSULE_Z = [-10, -5, 0, 5, 10];
 const PULT_POS = { x: 10.5, z: 6 };
+const DOMOVOI_POS = { x: PULT_POS.x - 1.3, y: 1.5, z: PULT_POS.z };
+const ISKRA_2D_POS = { x: -8, z: -12 };
+
+/* =========================================================
+   DIALOGUE
+   ========================================================= */
+const dialogue = {
+  active: false,
+  lines: [],
+  index: 0,
+  onComplete: null,
+};
+
+function startDialogue(speaker, lines, onComplete = null) {
+  if (dialogue.active) return;
+  dialogue.active = true;
+  dialogue.lines = lines;
+  dialogue.index = 0;
+  dialogue.onComplete = onComplete;
+  dialogueSpeakerEl.textContent = speaker;
+  dialogueTextEl.textContent = lines[0];
+  dialogueEl.classList.remove('dialogue-hidden');
+  console.log('[dialogue] start', speaker, '(', lines.length, 'lines)');
+}
+
+function advanceDialogue() {
+  if (!dialogue.active) return;
+  dialogue.index++;
+  if (dialogue.index >= dialogue.lines.length) {
+    closeDialogue();
+    return;
+  }
+  dialogueTextEl.textContent = dialogue.lines[dialogue.index];
+  console.log('[dialogue] line', dialogue.index + 1);
+}
+
+function closeDialogue() {
+  if (!dialogue.active) return;
+  dialogue.active = false;
+  dialogueEl.classList.add('dialogue-hidden');
+  const cb = dialogue.onComplete;
+  dialogue.onComplete = null;
+  console.log('[dialogue] closed');
+  if (cb) cb();
+}
 
 /* =========================================================
    INPUT
@@ -55,6 +103,7 @@ addEventListener('keydown', e => {
 addEventListener('keyup', e => { keys[e.code] = false; });
 
 function getMoveInput() {
+  if (dialogue.active) return { f: 0, r: 0 };
   let f = 0, r = 0;
   if (input.joyActive) { f = input.moveY; r = input.moveX; }
   else {
@@ -178,6 +227,12 @@ const game = {
   state: {
     last3DPos: { x: PLAYER_START.x, z: PLAYER_START.z },
     started: false,
+    flags: {
+      metDomovoi: false,
+      iskraFound: false,
+      iskraMaterialized: false,
+      domovoiSecond: false,
+    },
   },
 };
 
@@ -204,17 +259,29 @@ function hint(text, ms = 3000) {
   console.log('[hint]', text);
 }
 
+function refreshHUD() {
+  const is3D = game.scene?.is3D;
+  let text;
+  if (input.touchMode) {
+    text = is3D
+      ? '3D · джойстик — ходьба · правый край — камера · F — бросок · E — действие'
+      : '2D · джойстик — ходьба · E — действие';
+  } else {
+    text = is3D
+      ? '3D · WASD — движение · зажать мышь — камера · F — клубок · E — действие'
+      : '2D · WASD / стрелки — движение · E — действие';
+  }
+  if (game.state.flags.iskraMaterialized) text += ' · ✦ Искра';
+  hudEl.textContent = text;
+}
+
 function setCanvasMode(is3D) {
   D2.style.opacity = is3D ? '0' : '1';
   D3.style.opacity = is3D ? '1' : '0';
   D3.style.pointerEvents = is3D ? 'auto' : 'none';
   look.dx = 0; look.dy = 0;
   lookPointerId = null;
-  hudEl.textContent = input.touchMode
-    ? (is3D ? '3D · джойстик — ходьба · правый край — камера · F — бросок · E — действие'
-            : '2D · джойстик — ходьба · E — действие')
-    : (is3D ? '3D · WASD — движение · зажать мышь — камера · F — клубок · E — действие'
-            : '2D · WASD / стрелки — движение · E — действие');
+  refreshHUD();
 }
 
 /* =========================================================
@@ -299,7 +366,6 @@ function buildCapsule(index) {
   glow.position.y = 0.5;
   group.add(glow);
 
-  // Номер капсулы
   const numTex = makeCanvasTexture((c, w, h) => {
     c.fillStyle = isWarning ? '#ff3a4a' : '#4ff0ff';
     c.font = 'bold 80px monospace';
@@ -315,12 +381,81 @@ function buildCapsule(index) {
   return group;
 }
 
+function buildDomovoi() {
+  const group = new THREE.Group();
+
+  // тело
+  const body = new THREE.Mesh(
+    new THREE.SphereGeometry(0.4, 20, 16),
+    new THREE.MeshStandardMaterial({
+      color: 0x1a2a44, metalness: 0.8, roughness: 0.45,
+      emissive: 0x081420, emissiveIntensity: 0.5,
+    })
+  );
+  body.scale.set(1, 1.1, 0.95);
+  group.add(body);
+
+  // глаза
+  const eyeGeo = new THREE.SphereGeometry(0.09, 12, 12);
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x4ff0ff });
+  const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
+  eyeL.position.set(-0.15, 0.1, 0.34);
+  group.add(eyeL);
+  const eyeR = new THREE.Mesh(eyeGeo, eyeMat);
+  eyeR.position.set(0.15, 0.1, 0.34);
+  group.add(eyeR);
+
+  // клюв
+  const beak = new THREE.Mesh(
+    new THREE.ConeGeometry(0.09, 0.16, 4),
+    new THREE.MeshStandardMaterial({ color: 0xff8a1a, metalness: 0.6, roughness: 0.4 })
+  );
+  beak.position.set(0, -0.03, 0.42);
+  beak.rotation.x = Math.PI / 2;
+  group.add(beak);
+
+  // крылья
+  const wingGeo = new THREE.BoxGeometry(0.14, 0.42, 0.05);
+  const wingMat = new THREE.MeshStandardMaterial({ color: 0x0f1e35, metalness: 0.7, roughness: 0.5 });
+  const wingL = new THREE.Mesh(wingGeo, wingMat);
+  wingL.position.set(-0.36, -0.06, -0.02);
+  wingL.rotation.z = 0.35;
+  group.add(wingL);
+  const wingR = new THREE.Mesh(wingGeo, wingMat);
+  wingR.position.set(0.36, -0.06, -0.02);
+  wingR.rotation.z = -0.35;
+  group.add(wingR);
+
+  // антенна
+  const antenna = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.012, 0.012, 0.28, 4),
+    new THREE.MeshStandardMaterial({ color: 0x556677, metalness: 0.7 })
+  );
+  antenna.position.y = 0.47;
+  group.add(antenna);
+
+  const antLight = new THREE.Mesh(
+    new THREE.SphereGeometry(0.06, 10, 10),
+    new THREE.MeshBasicMaterial({ color: 0xffcc66 })
+  );
+  antLight.position.y = 0.64;
+  group.add(antLight);
+
+  // свечение
+  const glow = new THREE.PointLight(0x66ddff, 1.2, 3.5);
+  glow.position.z = 0.3;
+  group.add(glow);
+
+  return group;
+}
+
 /* =========================================================
    TRANSITIONS
    ========================================================= */
 async function collapseTo2D(world3d) {
   if (game.transitioning) return;
   game.transitioning = true;
+  closeDialogue();
   console.log('[transition] collapse start');
 
   game.state.last3DPos = { x: world3d.pos.x, z: world3d.pos.z };
@@ -423,7 +558,7 @@ async function inflateTo3D(world2d) {
   ).multiplyScalar(dist);
   const endPos = new THREE.Vector3(p.x, 1.7, p.z).add(off);
   const endFov = 60;
-  const endFogDensity = 0.02;
+  const endFogDensity = 0.018;
   const endScaleY = 1;
 
   overlay.style.transition = 'opacity 0.9s ease';
@@ -453,7 +588,7 @@ async function inflateTo3D(world2d) {
 }
 
 /* =========================================================
-   WORLD 3D — КРИОЗАЛ (полированная версия)
+   WORLD 3D — КРИОЗАЛ + ДОМОВОЙ
    ========================================================= */
 class World3D {
   constructor(game) { this.game = game; this.is3D = true; }
@@ -480,10 +615,9 @@ class World3D {
     const mainDir = new THREE.DirectionalLight(0xaaccff, 0.5);
     mainDir.position.set(5, 15, 10);
     scene.add(mainDir);
-    // ambient fill
     scene.add(new THREE.AmbientLight(0x1a2a4a, 0.4));
 
-    /* ---- starfield backdrop ---- */
+    /* ---- stars ---- */
     this._buildStars(scene);
 
     /* ---- floor ---- */
@@ -538,7 +672,7 @@ class World3D {
     }
     this.stripMat = stripMat;
 
-    /* ---- pipes along back wall ---- */
+    /* ---- pipes ---- */
     const pipeMat = new THREE.MeshStandardMaterial({ color: 0x2a3a5a, metalness: 0.8, roughness: 0.35 });
     for (let i = 0; i < 3; i++) {
       const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 24, 8), pipeMat);
@@ -547,7 +681,7 @@ class World3D {
       scene.add(pipe);
     }
 
-    /* ---- wall signs ---- */
+    /* ---- signs ---- */
     const rusPanel = makeTextTexture('РУСЬ-7', { color: '#4ff0ff', fontSize: 110, height: 1.6 });
     rusPanel.position.set(0, 3.4, ROOM.minZ + 0.28);
     scene.add(rusPanel);
@@ -562,7 +696,7 @@ class World3D {
     svarogPanel.rotation.y = -Math.PI / 2;
     scene.add(svarogPanel);
 
-    /* ---- data screen on left wall ---- */
+    /* ---- left data screen ---- */
     const screenTex = makeCanvasTexture((c, w, h) => {
       c.fillStyle = '#02060e';
       c.fillRect(0, 0, w, h);
@@ -627,7 +761,7 @@ class World3D {
       c.font = 'bold 16px monospace';
       c.fillText('> инициализация пробуждения...', w / 2, 130);
       c.fillText('> Сварог: ядро активно', w / 2, 155);
-      c.fillText('> Сварог: найди клубок', w / 2, 180);
+      c.fillText('> Сварог: найди домового', w / 2, 180);
     }, 512, 256);
     const pultScreen = new THREE.Mesh(
       new THREE.PlaneGeometry(1.9, 0.95),
@@ -638,7 +772,6 @@ class World3D {
     pultScreen.rotation.z = -0.15;
     scene.add(pultScreen);
 
-    // кнопки-индикаторы
     for (let i = 0; i < 6; i++) {
       const btn = new THREE.Mesh(
         new THREE.BoxGeometry(0.15, 0.03, 0.15),
@@ -648,7 +781,7 @@ class World3D {
       scene.add(btn);
     }
 
-    /* ---- data tablet on floor ---- */
+    /* ---- tablet ---- */
     const tablet = new THREE.Mesh(
       new THREE.BoxGeometry(0.5, 0.04, 0.35),
       new THREE.MeshStandardMaterial({ color: 0x44aaff, emissive: 0x2277ff, emissiveIntensity: 1.5 })
@@ -695,7 +828,6 @@ class World3D {
     this.riftBeam.position.set(RIFT_POS.x, 7.5, RIFT_POS.z);
     scene.add(this.riftBeam);
 
-    // shell (активируется при sealed)
     this.riftShell = new THREE.Mesh(
       new THREE.SphereGeometry(1.5, 32, 16),
       new THREE.MeshBasicMaterial({ color: 0x66ddff, transparent: true, opacity: 0, side: THREE.DoubleSide })
@@ -704,7 +836,6 @@ class World3D {
     this.riftShell.position.y = 0.7;
     scene.add(this.riftShell);
 
-    // активационная волна (видна коротко при запечатывании)
     this.riftWave = new THREE.Mesh(
       new THREE.RingGeometry(1.2, 1.5, 48),
       new THREE.MeshBasicMaterial({ color: 0x66ddff, transparent: true, opacity: 0, side: THREE.DoubleSide })
@@ -713,7 +844,7 @@ class World3D {
     this.riftWave.position.copy(RIFT_POS);
     this.riftWave.position.y = 0.06;
     scene.add(this.riftWave);
-    this.riftWaveT = -1;  // -1 = idle, 0..1 = animating
+    this.riftWaveT = -1;
 
     /* ---- klubok ---- */
     this.klubokMesh = new THREE.Group();
@@ -733,6 +864,28 @@ class World3D {
     this.thread.visible = false;
     scene.add(this.thread);
 
+    /* ---- domovoi ---- */
+    this.domovoi = buildDomovoi();
+    this.domovoi.position.set(DOMOVOI_POS.x, DOMOVOI_POS.y, DOMOVOI_POS.z);
+    this.domovoi.rotation.y = -Math.PI / 2;
+    scene.add(this.domovoi);
+
+    /* ---- iskra (если материализована) ---- */
+    this.iskraMesh = null;
+    if (g.state.flags.iskraMaterialized) {
+      this.iskraMesh = new THREE.Group();
+      const iskraBall = new THREE.Mesh(
+        new THREE.SphereGeometry(0.18, 14, 14),
+        new THREE.MeshStandardMaterial({
+          color: 0xffffff, emissive: 0x88ccff, emissiveIntensity: 4,
+        })
+      );
+      this.iskraMesh.add(iskraBall);
+      const iskraLight = new THREE.PointLight(0x88ccff, 2.5, 4);
+      this.iskraMesh.add(iskraLight);
+      scene.add(this.iskraMesh);
+    }
+
     /* ---- player ---- */
     this.player = new THREE.Group();
     const playerBodyMat = new THREE.MeshStandardMaterial({
@@ -745,7 +898,6 @@ class World3D {
     const playerGlow = new THREE.PointLight(0x66ddff, 1.5, 5);
     playerGlow.position.y = 1.2;
     this.player.add(playerGlow);
-    // маленький "визор" спереди, чтобы видеть лицо
     const visor = new THREE.Mesh(
       new THREE.BoxGeometry(0.9, 0.3, 0.05),
       new THREE.MeshBasicMaterial({ color: 0x88ffff })
@@ -764,13 +916,13 @@ class World3D {
     this.klubokMesh.position.copy(KLUBOK_START);
     this.klubokAnim = null;
 
-    // камера: intro pull-back при первом входе
     this.camDist = isFirst ? 2.5 : 9;
     this.lastRiftPrompt = 0;
-    this.transitionReady = false;
+    this.lastDomovoiHint = 0;
+    this.lastTabletHint = 0;
 
     hint(isFirst ? 'Ты один. Криозал «Русь-7». Осмотрись' : 'Снова в Яви', 4000);
-    console.log('[world3d] entered · kryoal (v4)');
+    console.log('[world3d] entered · v5');
   }
 
   _buildStars(scene) {
@@ -802,15 +954,11 @@ class World3D {
     );
     const dir = off.clone().normalize();
 
-    // коллизия камеры
     const rc = new THREE.Raycaster(playerHead.clone(), dir.clone(), 0.1, desiredDist);
     const hits = rc.intersectObjects(this.wallMeshes, false);
     let wantedDist = desiredDist;
-    if (hits.length > 0) {
-      wantedDist = Math.max(1.5, hits[0].distance - 0.4);
-    }
+    if (hits.length > 0) wantedDist = Math.max(1.5, hits[0].distance - 0.4);
 
-    // smooth: прижимаемся быстро, отъезжаем медленно
     if (this.camDist === undefined) this.camDist = wantedDist;
     const speed = wantedDist < this.camDist ? 22 : 3;
     this.camDist += (wantedDist - this.camDist) * Math.min(1, speed * dt);
@@ -872,18 +1020,19 @@ class World3D {
 
     this.klubokState = 'thrown';
     this.klubokAnim = { start: start.clone(), target, startTime: performance.now(), duration: 750 };
-    console.log('[klubok] thrown →', target.x.toFixed(1), target.z.toFixed(1));
+    console.log('[klubok] thrown');
   }
 
   sealKlubok() {
     this.klubokState = 'sealed';
-    this.riftWaveT = 0;  // запуск волны
+    this.riftWaveT = 0;
     hint('Портал открыт. Подойди к разлому и нажми E', 5000);
     console.log('[rift] activated · klubok sealed');
   }
 
   updateKlubok(dt) {
     const g = this.game;
+    const blocked = dialogue.active;
 
     if (this.klubokState === 'ground') {
       const d = Math.hypot(
@@ -893,14 +1042,11 @@ class World3D {
       if (d < 1.8) this.pickupKlubok();
     }
     else if (this.klubokState === 'carried') {
-      // klubok немного перед-сбоку от игрока
       const camDir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
       camDir.y = 0;
       if (camDir.lengthSq() > 0.001) {
         camDir.normalize();
-        // игрок поворачивается в сторону камеры
         this.player.rotation.y = angleLerp(this.player.rotation.y, Math.atan2(camDir.x, camDir.z), Math.min(1, dt * 10));
-        // klubok в руке справа
         const rightVec = new THREE.Vector3(camDir.z, 0, -camDir.x);
         this.klubokMesh.position.set(
           this.pos.x + camDir.x * 0.5 + rightVec.x * 0.6,
@@ -909,7 +1055,7 @@ class World3D {
         );
       }
       this.updateThreadToKlubok();
-      if (consumeAction('KeyF') && !g.transitioning) this.throwKlubok();
+      if (!blocked && consumeAction('KeyF') && !g.transitioning) this.throwKlubok();
     }
     else if (this.klubokState === 'thrown' && this.klubokAnim) {
       const a = this.klubokAnim;
@@ -941,14 +1087,12 @@ class World3D {
         this.klubokMesh.position.z - this.pos.z
       );
       if (d < 1.8) this.pickupKlubok();
-      // если игрок прицелился и нажал F — подбор+бросок одним действием
-      if (consumeAction('KeyF') && !g.transitioning) {
+      if (!blocked && consumeAction('KeyF') && !g.transitioning) {
         this.klubokState = 'carried';
         this.throwKlubok();
       }
     }
     else if (this.klubokState === 'sealed') {
-      // клубок «прилип» к разлому
       const targetX = RIFT_POS.x;
       const targetZ = RIFT_POS.z + 1.8;
       const targetY = 0.7 + Math.sin(this.t * 2.2) * 0.15;
@@ -962,7 +1106,6 @@ class World3D {
   updateRift(dt) {
     const sealed = this.klubokState === 'sealed';
 
-    // базовое кольцо
     if (sealed) {
       this.riftMat.emissiveIntensity = 4 + Math.sin(this.t * 5) * 1.6;
       this.riftMat.color.set(0x66ddff);
@@ -984,7 +1127,6 @@ class World3D {
     }
     this.rift.rotation.z = this.t * 0.8;
 
-    // волна активации
     if (this.riftWaveT >= 0) {
       this.riftWaveT += dt * 1.4;
       if (this.riftWaveT >= 1) {
@@ -999,11 +1141,89 @@ class World3D {
     }
   }
 
+  updateDomovoi(dt) {
+    if (!this.domovoi) return;
+    this.domovoi.position.y = DOMOVOI_POS.y + Math.sin(this.t * 2) * 0.08;
+    this.domovoi.rotation.z = Math.sin(this.t * 1.3) * 0.05;
+    // медленно покачивается, следит за игроком
+    const dx = this.pos.x - this.domovoi.position.x;
+    const dz = this.pos.z - this.domovoi.position.z;
+    const targetAngle = Math.atan2(dx, dz);
+    this.domovoi.rotation.y = angleLerp(this.domovoi.rotation.y, targetAngle, Math.min(1, dt * 2));
+  }
+
+  updateIskra(dt) {
+    if (!this.iskraMesh) return;
+    const offset = new THREE.Vector3(
+      Math.sin(this.t * 1.5) * 0.6,
+      1.6 + Math.sin(this.t * 2.2) * 0.12,
+      Math.cos(this.t * 1.5) * 0.6
+    );
+    this.iskraMesh.position.set(
+      this.pos.x + offset.x,
+      offset.y,
+      this.pos.z + offset.z
+    );
+  }
+
+  startDomovoiDialogue() {
+    const flags = this.game.state.flags;
+
+    // Приоритет 1: искра найдена, но второй диалог ещё не было
+    if (flags.iskraFound && !flags.domovoiSecond) {
+      flags.domovoiSecond = true;
+      flags.metDomovoi = true;
+      startDialogue('ДОМОВОЙ', [
+        'Ты нашёл искру. Не думал, что получится с первого раза.',
+        'Она — часть чьей-то души. Чья — не знаю. Но в Яви она обретает форму.',
+        'Дальше — Печь. В реакторе. Там ты узнаешь правду.',
+      ], () => {
+        hint('Уровень 1 пройден. Дальше — Печь', 6000);
+      });
+      console.log('[domovoi] second dialogue');
+      return;
+    }
+
+    // Приоритет 2: первая встреча
+    if (!flags.metDomovoi) {
+      flags.metDomovoi = true;
+      startDialogue('ДОМОВОЙ', [
+        'Живой?.. Живой!.. Значит, ещё не всё потеряно.',
+        'Экипаж в Нави. Все. Их души застряли между планами.',
+        'Я — домовой станции. Сварог-ИИ разбудил тебя не случайно.',
+        'Возьми клубок у пульта. Брось его в разлом — он откроет дорогу.',
+        'В Нави есть то, чего нет в Яви. Найди искру — она покажет путь.',
+      ], () => {
+        hint('Клубок — у пульта справа. Разлом — в центре', 5000);
+      });
+      console.log('[domovoi] first dialogue');
+      return;
+    }
+
+    // Default: повторяющаяся подсказка
+    startDialogue('ДОМОВОЙ', [
+      'Искра ждёт в Нави. Не возвращайся без неё.',
+    ]);
+  }
+
   handleInteraction() {
     if (this.game.transitioning) return;
+    if (dialogue.active) return;
     if (!consumeAction('KeyE')) return;
 
-    // разлом активен → переход
+    // Приоритет 1: домовой рядом
+    if (this.domovoi) {
+      const d = Math.hypot(
+        this.pos.x - this.domovoi.position.x,
+        this.pos.z - this.domovoi.position.z
+      );
+      if (d < 2.5) {
+        this.startDomovoiDialogue();
+        return;
+      }
+    }
+
+    // Приоритет 2: разлом активен
     if (this.klubokState === 'sealed') {
       const d = Math.hypot(this.pos.x - RIFT_POS.x, this.pos.z - RIFT_POS.z);
       if (d < RIFT_INTERACT_RADIUS) {
@@ -1013,13 +1233,14 @@ class World3D {
       }
     }
 
-    // планшет
+    // Приоритет 3: планшет
     if (!this.tabletRead && this.tablet) {
-      const dTablet = Math.hypot(this.pos.x - this.tablet.position.x, this.pos.z - this.tablet.position.z);
-      if (dTablet < 1.5) {
+      const d = Math.hypot(this.pos.x - this.tablet.position.x, this.pos.z - this.tablet.position.z);
+      if (d < 1.5) {
         this.tabletRead = true;
-        hint('Сварог: «Криозал. Экипаж молчит. Возьми клубок — он знает путь»', 6000);
+        hint('Сварог: «Криозал. Экипаж молчит. Найди домового у пульта»', 6000);
         console.log('[tablet] read');
+        return;
       }
     }
   }
@@ -1047,19 +1268,16 @@ class World3D {
       this.pos.z = clamp(this.pos.z, ROOM.minZ + PLAYER_PAD, ROOM.maxZ - PLAYER_PAD);
 
       this.player.position.set(this.pos.x, Math.sin(this.t * 9) * 0.05 * (moving ? 1 : 0), this.pos.z);
-      if (moving && this.klubokState !== 'carried') {
+      if (moving && this.klubokState !== 'carried' && !dialogue.active) {
         this.player.rotation.y = angleLerp(this.player.rotation.y, Math.atan2(move.x, move.z), Math.min(1, dt * 12));
       }
     }
 
-    // камера с коллизией
     this.updateCamera(dt);
-
-    // клубок
     this.updateKlubok(dt);
-
-    // разлом
     this.updateRift(dt);
+    this.updateDomovoi(dt);
+    this.updateIskra(dt);
 
     // аварийка
     const emergencyPulse = 2.2 + Math.sin(this.t * 3.4) * 1.4;
@@ -1068,17 +1286,26 @@ class World3D {
     }
     if (this.stripMat) this.stripMat.opacity = 0.4 + Math.sin(this.t * 3.4) * 0.2;
 
-    // планшет: подсказка при подходе
-    if (!this.tabletRead && this.tablet) {
+    // планшет
+    if (!this.tabletRead && this.tablet && !dialogue.active) {
       const d = Math.hypot(this.pos.x - this.tablet.position.x, this.pos.z - this.tablet.position.z);
-      if (d < 1.5 && this.t - (this.lastTabletHint || 0) > 3) {
+      if (d < 1.5 && this.t - this.lastTabletHint > 3) {
         hint('E — прочитать планшет', 2500);
         this.lastTabletHint = this.t;
       }
     }
 
-    // постоянная подсказка у активного разлома
-    if (this.klubokState === 'sealed') {
+    // домовой
+    if (this.domovoi && !dialogue.active) {
+      const d = Math.hypot(this.pos.x - this.domovoi.position.x, this.pos.z - this.domovoi.position.z);
+      if (d < 2.5 && this.t - this.lastDomovoiHint > 3) {
+        hint('E — поговорить с домовым', 2500);
+        this.lastDomovoiHint = this.t;
+      }
+    }
+
+    // разлом
+    if (this.klubokState === 'sealed' && !dialogue.active) {
       const d = Math.hypot(this.pos.x - RIFT_POS.x, this.pos.z - RIFT_POS.z);
       if (d < RIFT_INTERACT_RADIUS && this.t - this.lastRiftPrompt > 2.5) {
         hint('E — войти в разлом', 3000);
@@ -1086,7 +1313,6 @@ class World3D {
       }
     }
 
-    // взаимодействие
     this.handleInteraction();
   }
 
@@ -1107,7 +1333,7 @@ class World3D {
 }
 
 /* =========================================================
-   WORLD 2D — НАВЬ-КРИОЗАЛ
+   WORLD 2D — НАВЬ-КРИОЗАЛ + ИСКРА
    ========================================================= */
 class World2D {
   constructor(game) { this.game = game; this.is3D = false; }
@@ -1128,7 +1354,28 @@ class World2D {
     this.shadow = { x: 0, z: ROOM.minZ + 1, r: 0.7 };
     this.ghost = { angle: 0, radius: 5, cx: 0, cz: -4, x: 0, z: 0 };
 
-    hint('Навь · стены призрачны. Иди к тени клубка (в проёме)', 5000);
+    // Искра: видна, если ещё не найдена
+    this.iskra = null;
+    if (!this.game.state.flags.iskraFound) {
+      this.iskra = {
+        x: ISKRA_2D_POS.x,
+        z: ISKRA_2D_POS.z,
+        r: 0.4,
+        t: 0,
+      };
+      console.log('[iskra] present in Nav at', ISKRA_2D_POS);
+    }
+
+    // Искра материализуется в 3D, если её нашли
+    if (this.game.state.flags.iskraFound && !this.game.state.flags.iskraMaterialized) {
+      // Мы в 2D, но флаг "found" уже true (значит, взял только что). Материализация
+      // произойдёт при возврате в 3D (в World3D.enter). Здесь только лог.
+      console.log('[iskra] will materialize on return to Yav');
+    }
+
+    hint(this.iskra
+      ? 'Навь · стены призрачны. Найди искру в дальнем углу'
+      : 'Навь · искры больше нет. Иди к тени клубка', 5000);
     console.log('[world2d] entered · навь-криозал');
   }
 
@@ -1157,6 +1404,19 @@ class World2D {
       this.ghost.x = this.ghost.cx + Math.cos(this.ghost.angle) * this.ghost.radius;
       this.ghost.z = this.ghost.cz + Math.sin(this.ghost.angle) * this.ghost.radius;
 
+      // искра
+      if (this.iskra) {
+        this.iskra.t += dt;
+        const dIskra = Math.hypot(p.x - this.iskra.x, p.z - this.iskra.z);
+        if (dIskra < 1.5 && consumeAction('KeyE')) {
+          this.iskra = null;
+          this.game.state.flags.iskraFound = true;
+          hint('Искра в руках. Вернись в Явь через проём', 5000);
+          console.log('[iskra] picked up in Nav');
+        }
+      }
+
+      // возврат через тень
       const d = Math.hypot(p.x - this.shadow.x, p.z - this.shadow.z);
       if (d < 1.5 && consumeAction('KeyE')) {
         console.log('[input] E → inflate');
@@ -1185,14 +1445,12 @@ class World2D {
     for (let y = oy - step; y <= h + step; y += step) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
     ctx.stroke();
 
-    // пол
     ctx.fillStyle = 'rgba(20,40,80,0.22)';
     const fx = sx(ROOM.minX), fy = sy(ROOM.minZ);
     const fw = (ROOM.maxX - ROOM.minX) * scale;
     const fh = (ROOM.maxZ - ROOM.minZ) * scale;
     ctx.fillRect(fx, fy, fw, fh);
 
-    // стены с проёмом
     ctx.strokeStyle = '#7cffd8';
     ctx.lineWidth = 3;
     ctx.lineCap = 'round';
@@ -1217,7 +1475,6 @@ class World2D {
     ctx.lineTo(sx(ROOM.maxX), sy(ROOM.maxZ));
     ctx.stroke();
 
-    // проём-свечение
     ctx.strokeStyle = 'rgba(255,204,102,0.35)';
     ctx.lineWidth = 6;
     ctx.beginPath();
@@ -1266,6 +1523,46 @@ class World2D {
     ctx.fillStyle = `rgba(220,240,255,${ghostAlpha + 0.15})`;
     ctx.beginPath(); ctx.arc(gx, gy, 0.5 * scale, 0, Math.PI * 2); ctx.fill();
 
+    // ИСКРА
+    if (this.iskra) {
+      const ix = sx(this.iskra.x), iy = sy(this.iskra.z);
+      const iskraPulse = 0.7 + Math.sin(this.t * 4) * 0.3;
+      const radius = 1.6 * scale * iskraPulse;
+
+      const ig = ctx.createRadialGradient(ix, iy, 0, ix, iy, radius);
+      ig.addColorStop(0, `rgba(255,255,255,${0.95})`);
+      ig.addColorStop(0.25, `rgba(180,220,255,${0.7 * iskraPulse})`);
+      ig.addColorStop(1, 'rgba(100,180,255,0)');
+      ctx.fillStyle = ig;
+      ctx.beginPath(); ctx.arc(ix, iy, radius, 0, Math.PI * 2); ctx.fill();
+
+      // ядро
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(ix, iy, 0.35 * scale, 0, Math.PI * 2); ctx.fill();
+
+      // лучи
+      ctx.strokeStyle = `rgba(255,255,255,${0.5 * iskraPulse})`;
+      ctx.lineWidth = 1.5;
+      for (let k = 0; k < 4; k++) {
+        const a = this.t * 0.5 + k * Math.PI / 2;
+        const r1 = 0.6 * scale;
+        const r2 = 1.4 * scale * iskraPulse;
+        ctx.beginPath();
+        ctx.moveTo(ix + Math.cos(a) * r1, iy + Math.sin(a) * r1);
+        ctx.lineTo(ix + Math.cos(a) * r2, iy + Math.sin(a) * r2);
+        ctx.stroke();
+      }
+
+      // подсказка
+      const dIskra = Math.hypot(this.player.x - this.iskra.x, this.player.z - this.iskra.z);
+      if (dIskra < 1.5) {
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '16px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(input.touchMode ? 'E — взять искру' : 'E — взять искру', w / 2, 66);
+      }
+    }
+
     // тень клубка
     const shx = sx(this.shadow.x), shy = sy(this.shadow.z);
     const pulse = 0.55 + Math.sin(this.t * 3) * 0.3;
@@ -1309,6 +1606,21 @@ class World2D {
 }
 
 /* =========================================================
+   ISKRA MATERIALIZATION ON RETURN
+   ========================================================= */
+// Эта функция вызывается из World3D.enter через проверку flag —
+// но мы дублируем событие здесь, чтобы показать hint один раз.
+function checkIskraMaterialization() {
+  const flags = game.state.flags;
+  if (flags.iskraFound && !flags.iskraMaterialized) {
+    flags.iskraMaterialized = true;
+    hint('Искра обрела форму в Яви. Поговори с домовым', 5000);
+    refreshHUD();
+    console.log('[iskra] materialized in Yav');
+  }
+}
+
+/* =========================================================
    START
    ========================================================= */
 let last = performance.now();
@@ -1316,9 +1628,19 @@ function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.05);
   last = now;
   game.time += dt;
+
+  // диалог — глобальная обработка E
+  if (dialogue.active && consumeAction('KeyE')) {
+    advanceDialogue();
+  }
+
   const s = game.scene;
   if (s) {
-    if (!game.transitioning) s.update?.(dt);
+    if (!game.transitioning) {
+      // Проверяем материализацию искры: если вернулись в 3D с флагом iskraFound
+      if (s.is3D) checkIskraMaterialization();
+      s.update?.(dt);
+    }
     s.render?.();
   }
   requestAnimationFrame(frame);
@@ -1335,4 +1657,4 @@ requestAnimationFrame(() => {
   overlay.style.opacity = '0';
 });
 
-console.log('[iskra] booted, v4');
+console.log('[iskra] booted, v5');
