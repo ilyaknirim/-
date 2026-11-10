@@ -2,28 +2,166 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>2D ⇄ 3D — Engine Prototype</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#05070d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>ISKRA · ИСКРА — Level 1 Prototype</title>
 <style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  html,body{height:100%;background:#05070d;overflow:hidden;
-    font-family:system-ui,-apple-system,sans-serif;color:#cfe6ff;
-    -webkit-user-select:none;user-select:none}
-  #stage{position:fixed;inset:0}
-  canvas{position:absolute;inset:0;width:100%;height:100%;display:block;
-    transition:opacity .35s ease}
-  #c3d{opacity:0;pointer-events:none;touch-action:none}
+  * { margin: 0; padding: 0; box-sizing: border-box; }
 
-  #overlay{position:fixed;inset:0;background:#000;opacity:1;z-index:10;
-    pointer-events:none;transition:opacity .6s ease}
+  html, body {
+    height: 100%;
+    background: #05070d;
+    overflow: hidden;
+    font-family: system-ui, -apple-system, sans-serif;
+    color: #cfe6ff;
+    overscroll-behavior: none;
+    touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
 
-  #hint{position:fixed;left:50%;top:14%;transform:translateX(-50%);
-    z-index:6;pointer-events:none;font-size:20px;letter-spacing:.04em;
-    opacity:0;transition:opacity .4s;text-shadow:0 0 24px #4af;white-space:nowrap}
-  #hint.show{opacity:1}
+  #stage { position: fixed; inset: 0; }
+  canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    transition: opacity .35s ease;
+    touch-action: none;
+  }
+  #c3d { opacity: 0; pointer-events: none; }
 
-  #hud{position:fixed;left:16px;bottom:14px;z-index:5;font-size:13px;
-    opacity:.6;letter-spacing:.03em}
+  #overlay {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    opacity: 1;
+    z-index: 10;
+    pointer-events: none;
+    transition: opacity .6s ease;
+  }
+
+  #hint {
+    position: fixed;
+    left: 50%;
+    top: 12%;
+    transform: translateX(-50%);
+    z-index: 6;
+    pointer-events: none;
+    font-size: 16px;
+    letter-spacing: .03em;
+    opacity: 0;
+    transition: opacity .4s;
+    text-shadow: 0 0 24px #4af;
+    text-align: center;
+    max-width: 90vw;
+    padding: 0 16px;
+    line-height: 1.3;
+  }
+  @media (min-width: 768px) {
+    #hint { font-size: 19px; letter-spacing: .04em; }
+  }
+  #hint.show { opacity: 1; }
+
+  #hud {
+    position: fixed;
+    left: 16px;
+    bottom: 14px;
+    z-index: 5;
+    font-size: 12px;
+    opacity: .55;
+    letter-spacing: .03em;
+    max-width: 60vw;
+    line-height: 1.35;
+  }
+  @media (min-width: 768px) { #hud { font-size: 13px; max-width: none; } }
+
+  /* ---- Mobile UI ---- */
+  #mobile-ui {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    pointer-events: none;
+    display: none;
+  }
+  #mobile-ui.visible { display: block; }
+
+  #joystick-container {
+    position: absolute;
+    left: max(20px, env(safe-area-inset-left, 20px));
+    bottom: max(20px, env(safe-area-inset-bottom, 20px));
+    pointer-events: auto;
+    touch-action: none;
+  }
+  #joystick-base {
+    width: 130px;
+    height: 130px;
+    border-radius: 50%;
+    background: rgba(79, 240, 255, 0.12);
+    border: 2px solid rgba(79, 240, 255, 0.4);
+    position: relative;
+    touch-action: none;
+    box-shadow: 0 0 24px rgba(79, 240, 255, 0.15);
+  }
+  #joystick-thumb {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: rgba(79, 240, 255, 0.6);
+    border: 2px solid rgba(79, 240, 255, 0.9);
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 18px rgba(79, 240, 255, 0.6);
+    pointer-events: none;
+  }
+
+  #action-buttons {
+    position: absolute;
+    right: max(20px, env(safe-area-inset-right, 20px));
+    bottom: max(20px, env(safe-area-inset-bottom, 20px));
+    display: flex;
+    gap: 14px;
+    pointer-events: auto;
+    flex-direction: row-reverse;
+  }
+  .action-btn {
+    width: 76px;
+    height: 76px;
+    border-radius: 50%;
+    background: rgba(79, 240, 255, 0.18);
+    border: 2px solid rgba(79, 240, 255, 0.55);
+    color: #4ff0ff;
+    font-size: 22px;
+    font-weight: bold;
+    font-family: ui-monospace, monospace;
+    touch-action: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    box-shadow: 0 0 18px rgba(79, 240, 255, 0.2);
+    transition: transform 0.1s, background 0.1s, box-shadow 0.1s;
+  }
+  .action-btn.active {
+    transform: scale(0.92);
+    background: rgba(79, 240, 255, 0.5);
+    box-shadow: 0 0 28px rgba(79, 240, 255, 0.6);
+  }
+  .action-btn[data-action="F"] {
+    background: rgba(255, 204, 102, 0.18);
+    border-color: rgba(255, 204, 102, 0.55);
+    color: #ffcc66;
+    box-shadow: 0 0 18px rgba(255, 204, 102, 0.2);
+  }
+  .action-btn[data-action="F"].active {
+    background: rgba(255, 204, 102, 0.55);
+    box-shadow: 0 0 28px rgba(255, 204, 102, 0.7);
+  }
 </style>
 
 <script type="importmap">
@@ -44,6 +182,18 @@
 <div id="hint"></div>
 <div id="hud"></div>
 <div id="overlay"></div>
+
+<div id="mobile-ui">
+  <div id="joystick-container">
+    <div id="joystick-base">
+      <div id="joystick-thumb"></div>
+    </div>
+  </div>
+  <div id="action-buttons">
+    <button class="action-btn" data-action="F" aria-label="Бросить клубок">F</button>
+    <button class="action-btn" data-action="E" aria-label="Действие">E</button>
+  </div>
+</div>
 
 <script type="module" src="./main.js"></script>
 </body>
