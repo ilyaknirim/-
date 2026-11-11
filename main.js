@@ -322,7 +322,37 @@ function makeCapsuleTexture(index, isWarning = false) {
       c.bezierCurveTo(w * 0.3, y + (rnd() - 0.5) * 20, w * 0.7, y + (rnd() - 0.5) * 20, w, y);
       c.stroke();
     }
+/* Надпись на стене: возвращает меш с текстом */
+function makeTextTexture(text, opts = {}) {
+  const color = opts.color || '#d4a843';
+  const fontSize = opts.fontSize || 80;
+  const height = opts.height || 1;
 
+  const cv = document.createElement('canvas');
+  const c2 = cv.getContext('2d');
+  const font = `bold ${fontSize}px ui-monospace, "Courier New", monospace`;
+  c2.font = font;
+  const textW = Math.ceil(c2.measureText(text).width);
+  cv.width = textW + fontSize;
+  cv.height = Math.ceil(fontSize * 1.6);
+
+  c2.font = font;
+  c2.textAlign = 'center';
+  c2.textBaseline = 'middle';
+  c2.shadowColor = color;
+  c2.shadowBlur = 18;
+  c2.fillStyle = color;
+  c2.fillText(text, cv.width / 2, cv.height / 2);
+
+  const tex = new THREE.CanvasTexture(cv);
+  tex.needsUpdate = true;
+
+  const width = height * (cv.width / cv.height);
+  return new THREE.Mesh(
+    new THREE.PlaneGeometry(width, height),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })
+  );
+}
     // резной орнамент — вертикальные ряды
     const ornamentColor = isWarning ? '#ff3a4a' : '#d4a843';
     for (let y = 30; y < h - 30; y += 60) {
