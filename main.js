@@ -580,8 +580,9 @@ const SAVE_KEY = 'iskra.save.v1';
 function saveGame() {
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify({
-      v: 1,
+      v: 2,
       flags: game.state.flags,
+      last3DPos: game.state.last3DPos,
     }));
   } catch (e) {
     console.warn('[save] failed', e);
@@ -593,8 +594,11 @@ function loadGame() {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return;
     const data = JSON.parse(raw);
-    if (data && data.v === 1 && data.flags) {
-      Object.assign(game.state.flags, data.flags);
+    if (data && (data.v === 1 || data.v === 2)) {
+      if (data.flags) Object.assign(game.state.flags, data.flags);
+      if (data.last3DPos && Number.isFinite(data.last3DPos.x) && Number.isFinite(data.last3DPos.z)) {
+        game.state.last3DPos = { x: data.last3DPos.x, z: data.last3DPos.z };
+      }
     }
   } catch (e) {
     console.warn('[save] load failed', e);
@@ -864,6 +868,7 @@ async function collapseTo2D(world3d) {
   closeDialogue();
 
   game.state.last3DPos = { x: world3d.pos.x, z: world3d.pos.z };
+  saveGame();
 
   const cam = world3d.camera;
   const p = world3d.pos;
@@ -938,6 +943,12 @@ async function inflateTo3D(world2d) {
   game.scene.resize(game.w, game.h);
 
   const world3d = game.scene;
+  // Возвращаемся в Явь в той же точке, из которой ушли в Навь.
+  const savedPos = game.state.last3DPos || { x: PLAYER_START.x, z: PLAYER_START.z };
+  world3d.pos.set(savedPos.x, PLAYER_START.y, savedPos.z);
+  world3d.player.position.set(savedPos.x, 0, savedPos.z);
+  world3d.camera.position.set(savedPos.x, 6, savedPos.z + 9);
+  world3d.camera.lookAt(savedPos.x, 1.7, savedPos.z);
   const cam = world3d.camera;
   const p = world3d.pos;
 
