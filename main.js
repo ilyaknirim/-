@@ -569,6 +569,7 @@ const game = {
       iskraFound: false,
       iskraMaterialized: false,
       domovoiSecond: false,
+      askedBody: false,
     },
   },
 };
@@ -1359,34 +1360,8 @@ class World3D {
     this.domovoi.rotation.y = -Math.PI / 2;
     scene.add(this.domovoi);
 
-    /* ---- ИСКРА (если материализована) ---- */
     this.iskraMesh = null;
-    if (g.state.flags.iskraMaterialized) {
-      this.iskraMesh = new THREE.Group();
-      const iskraBall = new THREE.Mesh(
-        new THREE.SphereGeometry(0.16, 14, 14),
-        new THREE.MeshStandardMaterial({
-          color: 0xffffff, emissive: 0xffcc66, emissiveIntensity: 5,
-        })
-      );
-      this.iskraMesh.add(iskraBall);
-
-      // сварга-оберег вокруг искры
-      for (let i = 0; i < 4; i++) {
-        const a = i * Math.PI / 2;
-        const ray = new THREE.Mesh(
-          new THREE.BoxGeometry(0.04, 0.04, 0.4),
-          new THREE.MeshBasicMaterial({ color: 0xffcc66, transparent: true, opacity: 0.7 })
-        );
-        ray.position.set(Math.cos(a) * 0.25, 0, Math.sin(a) * 0.25);
-        ray.rotation.y = a;
-        this.iskraMesh.add(ray);
-      }
-
-      const iskraLight = new THREE.PointLight(0xffcc66, 2.5, 4);
-      this.iskraMesh.add(iskraLight);
-      scene.add(this.iskraMesh);
-    }
+    this.playerHead = null;
 
     /* ---- ИГРОК ---- */
     this.player = new THREE.Group();
@@ -1439,8 +1414,48 @@ class World3D {
     this.lastDomovoiHint = 0;
     this.lastTabletHint = 0;
 
+    this.refreshAppearance();
+
     hint(isFirst ? 'Сон-палата «Русь-Ковчег 7». Осмотрись' : 'Снова в Яви', 4000);
     console.log('[world3d] entered · v6 slavic');
+  }
+
+  refreshAppearance() {
+    const flags = this.game.state.flags;
+    if (!flags.iskraMaterialized) return;
+
+    if (!this.iskraMesh) {
+      this.iskraMesh = new THREE.Group();
+      const iskraBall = new THREE.Mesh(
+        new THREE.SphereGeometry(0.16, 14, 14),
+        new THREE.MeshStandardMaterial({
+          color: 0xffffff, emissive: 0xffcc66, emissiveIntensity: 5,
+        })
+      );
+      this.iskraMesh.add(iskraBall);
+
+      for (let i = 0; i < 4; i++) {
+        const a = i * Math.PI / 2;
+        const ray = new THREE.Mesh(
+          new THREE.BoxGeometry(0.04, 0.04, 0.4),
+          new THREE.MeshBasicMaterial({ color: 0xffcc66, transparent: true, opacity: 0.7 })
+        );
+        ray.position.set(Math.cos(a) * 0.25, 0, Math.sin(a) * 0.25);
+        ray.rotation.y = a;
+        this.iskraMesh.add(ray);
+      }
+
+      this.iskraMesh.add(new THREE.PointLight(0xffcc66, 2.5, 4));
+      this.scene3.add(this.iskraMesh);
+    }
+
+    if (!this.playerHead && this.player) {
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 12), this.playerBodyMat);
+      head.position.y = 2.4;
+      this.player.add(head);
+      this.playerHead = head;
+      if (this.playerCandle) this.playerCandle.position.y = 3.1;
+    }
   }
 
   _buildStars(scene) {
@@ -1711,6 +1726,27 @@ class World3D {
       return;
     }
 
+    if (!flags.askedBody) {
+      flags.askedBody = true;
+      saveGame();
+      startDialogue('ДОМОВОЙ', [
+        'Смотришь на себя и видишь ящик? Не пугайся.',
+        'Реактор ковчега дышит на двенадцати процентах. Сварог рисует мир по минимуму: стены, пол, а вместо тебя — заглушку.',
+        'Он не помнит твоего лица. Пока не помнит. Чем больше памяти вернёшь, тем подробнее станет мир.',
+        'В Нави проще: у души нет формы. Там ты — просто огонёк свечи.',
+        'Найди искру. Это первая деталь твоего лица.',
+      ]);
+      return;
+    }
+
+    if (flags.iskraFound) {
+      startDialogue('ДОМОВОЙ', [
+        'Искра с тобой. Видишь — у ящика появилась голова.',
+        'Дальше — Печь. Не спеши.',
+      ]);
+      return;
+    }
+
     startDialogue('ДОМОВОЙ', [
       'Искра ждёт в Нави. Не возвращайся без неё.',
     ]);
@@ -1744,7 +1780,7 @@ class World3D {
       const d = Math.hypot(this.pos.x - this.tablet.position.x, this.pos.z - this.tablet.position.z);
       if (d < 1.5) {
         this.tabletRead = true;
-        hint('Сварог: «Сон-палата. Экипаж молчит. Найди домового у печи»', 6000);
+        hint('Сварог: «Реактор 12%. Мир в режиме экономии. Найди домового у печи»', 6000);
         return;
       }
     }
@@ -1863,7 +1899,7 @@ class World2D {
     }
 
     hint(this.iskra
-      ? 'Навь · стены призрачны. Найди искру в дальнем углу'
+      ? 'Навь · у души нет формы, ты — огонёк свечи. Найди искру'
       : 'Навь · искры больше нет. Иди к тени клубка', 5000);
     console.log('[world2d] entered · nav slavic');
   }
@@ -2194,6 +2230,7 @@ function checkIskraMaterialization() {
   if (flags.iskraFound && !flags.iskraMaterialized) {
     flags.iskraMaterialized = true;
     saveGame();
+    game.scene.refreshAppearance?.();
     hint('Искра обрела форму в Яви. Поговори с домовым', 5000);
     refreshHUD();
   }
