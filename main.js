@@ -931,6 +931,17 @@ async function inflateTo3D(world2d) {
   if (game.transitioning) return;
   game.transitioning = true;
 
+  // Навь и Явь используют общую плоскость координат X/Z.
+  // Поэтому точка возврата — текущая позиция огонька в Нави,
+  // а не сохранённая точка входа в измерение.
+  if (world2d?.player && Number.isFinite(world2d.player.x) && Number.isFinite(world2d.player.z)) {
+    game.state.last3DPos = {
+      x: clamp(world2d.player.x, ROOM.minX + PLAYER_PAD, ROOM.maxX - PLAYER_PAD),
+      z: clamp(world2d.player.z, ROOM.minZ + PLAYER_PAD, ROOM.maxZ - PLAYER_PAD),
+    };
+    saveGame();
+  }
+
   overlay.style.transition = 'opacity 0.35s ease';
   overlay.style.background = 'black';
   overlay.style.opacity = '1';
@@ -943,7 +954,7 @@ async function inflateTo3D(world2d) {
   game.scene.resize(game.w, game.h);
 
   const world3d = game.scene;
-  // Возвращаемся в Явь в той же точке, из которой ушли в Навь.
+  // Возвращаемся в Явь в точку, где огонёк завершил путь по Нави.
   const savedPos = game.state.last3DPos || { x: PLAYER_START.x, z: PLAYER_START.z };
   world3d.pos.set(savedPos.x, PLAYER_START.y, savedPos.z);
   world3d.player.position.set(savedPos.x, 0, savedPos.z);
